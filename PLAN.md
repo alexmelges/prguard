@@ -53,9 +53,21 @@ All 10 core issues resolved. All enhancement items done except:
 5. **`withRetry` in embed.ts** — shared by both embedding and vision calls
 6. **Bot detection by `[bot]` suffix** — covers GitHub Apps + Dependabot/Renovate
 
+## Iteration 4: Deep Code Review
+
+| Item | Status |
+|------|--------|
+| LLM-powered code review (`src/review.ts`) | ✅ |
+| Reviews table in DB | ✅ |
+| Cross-PR comparison | ✅ |
+| Weighted `pickBestPR` (review 40%, quality 30%, vision 30%) | ✅ |
+| Enhanced comment with review section | ✅ |
+| Config: `deep_review`, `review_model`, `max_diff_tokens` | ✅ |
+| Tests (10 new review tests, 3 DB review tests, 1 comment snapshot) | ✅ |
+
 ## Review Scores
 
-Reviewed 2026-02-17 (iteration 3). 75 tests passing, TypeScript clean.
+Reviewed 2026-02-17 (iteration 4). 89 tests passing, TypeScript clean.
 
 | Dimension | Score | Notes |
 |-----------|-------|-------|
@@ -63,11 +75,11 @@ Reviewed 2026-02-17 (iteration 3). 75 tests passing, TypeScript clean.
 | **Test coverage** | 8/10 | 75 tests: unit, integration, handler-level with mocked Probot context, error paths (OpenAI 500/auth, GitHub 404, rate limits), comment snapshot tests (7 scenarios). |
 | **Documentation** | 8/10 | Comprehensive README with deploy guide, observability docs, env vars, config reference. .env.example, app.yml. |
 | **Deployment** | 8/10 | Dockerfile works (multi-stage, native deps handled), docker-compose, volume for SQLite, /healthz endpoint. |
-| **Feature completeness** | 8/10 | Core loop solid: dedup, quality scoring, vision alignment, labels, comments, backfill CLI. Graceful degradation when OpenAI is down. |
+| **Feature completeness** | 9/10 | Core loop solid: dedup, quality scoring, **LLM code review**, vision alignment, labels, comments, backfill CLI. Cross-PR comparison. Graceful degradation when OpenAI is down. |
 | **Operational readiness** | 8/10 | Structured logging with context, /healthz health check, /metrics Prometheus endpoint, graceful degradation, startup validation, rate limiting, retry with backoff. |
 | **DX** | 7/10 | Clean scripts, vitest, TSX for CLI. Missing: `npm run dev` with smee.io proxy, contributing guide. |
 
-**Overall: 8.0/10** — Production-ready for a v0.1. Observability, test coverage, and graceful degradation all addressed.
+**Overall: 8.6/10** — Deep code review closes the biggest gap. Cross-PR comparison and weighted scoring make duplicate handling substantive.
 
 ## Lessons
 

@@ -12,7 +12,7 @@
 |---|---|---|---|
 | Scan every PR and Issue | ✅ Probot webhooks on open/edit | 9/10 | Missing: reopen events |
 | De-dupe | ✅ Embeddings + cosine similarity | 8/10 | Need to test at 3000+ PR scale |
-| Detect best PR (deep review) | ⚠️ Heuristic quality scoring | 5/10 | **No LLM code review** — scores structure not substance |
+| Detect best PR (deep review) | ✅ LLM code review + weighted scoring | 8/10 | GPT-4o-mini reviews diffs, cross-PR comparison, cached in DB |
 | Vision document | ✅ .github/prguard.yml + GPT-4o-mini | 8/10 | Works but vision eval is shallow (title+body+diff summary, not full diff) |
 | "Even assisting would help" | ✅ Comments + labels, no auto-close | 9/10 | Good — advisory not authoritative |
 
