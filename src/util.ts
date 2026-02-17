@@ -4,8 +4,8 @@ import { summaryMarker } from "./comment.js";
 export const OPENAI_BUDGET_PER_HOUR = 60;
 
 export interface Logger {
-  info: (msg: string) => void;
-  warn: (msg: string) => void;
+  info: (msgOrObj: string | Record<string, unknown>, msg?: string) => void;
+  warn: (msgOrObj: string | Record<string, unknown>, msg?: string) => void;
   error: (obj: unknown, msg?: string) => void;
 }
 

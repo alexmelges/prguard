@@ -1,5 +1,5 @@
 import type { Probot } from "probot";
-import { buildSummaryComment } from "../comment.js";
+import { buildSummaryComment, buildDegradedComment } from "../comment.js";
 import { loadRepoConfig } from "../config.js";
 import {
   checkRateLimit,
@@ -11,6 +11,7 @@ import {
 import { buildEmbeddingInput, createOpenAIClient, getEmbedding } from "../embed.js";
 import { findDuplicates } from "../dedup.js";
 import { applyLabels, ensureLabels } from "../labels.js";
+import { inc } from "../metrics.js";
 import type { AnalysisRecord, EmbeddingRecord } from "../types.js";
 import {
   isBot,
@@ -41,22 +42,22 @@ export async function handleIssue(app: Probot, context: { octokit: any; payload:
   const author = payload.issue.user.login;
   const db = getDb();
 
-  log.info(`Processing issue #${number} in ${fullRepo} by ${author}`);
+  log.info({ repo: fullRepo, number, author, action: "issue.start" }, `Processing issue #${number} in ${fullRepo} by ${author}`);
 
   const config = await loadRepoConfig({ octokit: context.octokit, owner, repo });
 
   if (config.trusted_users.includes(author)) {
-    log.info(`Skipping trusted user ${author}`);
+    log.info({ repo: fullRepo, number, author, action: "issue.skip_trusted" }, `Skipping trusted user ${author}`);
     return;
   }
 
   if (config.skip_bots && isBot(author, payload.issue.user.type)) {
-    log.info(`Skipping bot user ${author}`);
+    log.info({ repo: fullRepo, number, author, action: "issue.skip_bot" }, `Skipping bot user ${author}`);
     return;
   }
 
   if (!checkRateLimit(db, fullRepo, OPENAI_BUDGET_PER_HOUR)) {
-    log.warn(`Rate limit exceeded for ${fullRepo} — skipping`);
+    log.warn({ repo: fullRepo, number, action: "issue.rate_limited" }, `Rate limit exceeded for ${fullRepo} — skipping`);
     return;
   }
 
@@ -64,13 +65,28 @@ export async function handleIssue(app: Probot, context: { octokit: any; payload:
     await ensureLabels({ octokit: context.octokit, owner, repo, labels: config.labels });
   }
 
-  const openaiClient = createOpenAIClient();
+  // Attempt OpenAI — graceful degradation
+  let openaiClient;
+  try {
+    openaiClient = createOpenAIClient();
+  } catch {
+    log.warn({ repo: fullRepo, number, action: "issue.openai_unavailable" }, "OpenAI client creation failed — degrading gracefully");
+    await handleDegradedIssue({ context, config, owner, repo, number, log });
+    inc("openai_degraded_total");
+    inc("issues_analyzed_total");
+    return;
+  }
+
   const body = normalizeBody(payload.issue.body);
   const input = buildEmbeddingInput(payload.issue.title, body);
   const embedding = await getEmbedding(input, openaiClient, undefined, log);
+  inc("openai_calls_total");
 
   if (embedding.length === 0) {
-    log.warn(`Embedding generation failed for issue #${number} — skipping`);
+    log.warn({ repo: fullRepo, number, action: "issue.embedding_failed" }, `Embedding generation failed for issue #${number} — degrading gracefully`);
+    await handleDegradedIssue({ context, config, owner, repo, number, log });
+    inc("openai_degraded_total");
+    inc("issues_analyzed_total");
     return;
   }
 
@@ -86,6 +102,9 @@ export async function handleIssue(app: Probot, context: { octokit: any; payload:
   upsertEmbedding(db, record);
 
   const duplicates = findDuplicates(record, listEmbeddings(db, fullRepo), config.duplicate_threshold);
+  if (duplicates.length > 0) {
+    inc("duplicates_found_total", duplicates.length);
+  }
 
   const analysis: AnalysisRecord = {
     repo: fullRepo,
@@ -112,7 +131,7 @@ export async function handleIssue(app: Probot, context: { octokit: any; payload:
       labels: labelsToApply
     });
   } else {
-    log.info(`[DRY RUN] Would apply labels: ${labelsToApply.join(", ")}`);
+    log.info({ repo: fullRepo, number, labels: labelsToApply, action: "issue.dry_run_labels" }, `[DRY RUN] Would apply labels: ${labelsToApply.join(", ")}`);
   }
 
   const summary = buildSummaryComment({
@@ -132,5 +151,43 @@ export async function handleIssue(app: Probot, context: { octokit: any; payload:
     log
   });
 
-  log.info(`PRGuard analyzed issue #${number} in ${fullRepo}`);
+  inc("issues_analyzed_total");
+  log.info({ repo: fullRepo, number, duplicates: duplicates.length, action: "issue.complete" }, `PRGuard analyzed issue #${number} in ${fullRepo}`);
+}
+
+/** Handle an issue when OpenAI is unavailable. */
+async function handleDegradedIssue(params: {
+  context: { octokit: any };
+  config: import("../types.js").PRGuardConfig;
+  owner: string;
+  repo: string;
+  number: number;
+  log: import("../util.js").Logger;
+}): Promise<void> {
+  const { context, config, owner, repo, number, log } = params;
+
+  if (!config.dry_run) {
+    await ensureLabels({ octokit: context.octokit, owner, repo, labels: config.labels });
+    await applyLabels({
+      octokit: context.octokit,
+      owner,
+      repo,
+      issueNumber: number,
+      labels: [config.labels.needs_review]
+    });
+  }
+
+  const summary = buildDegradedComment();
+
+  await upsertSummaryComment({
+    octokit: context.octokit,
+    owner,
+    repo,
+    issueNumber: number,
+    body: summary,
+    dryRun: config.dry_run,
+    log
+  });
+
+  log.warn({ repo: `${owner}/${repo}`, number, action: "issue.degraded" }, `Posted degraded comment for issue #${number}`);
 }

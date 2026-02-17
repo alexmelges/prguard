@@ -1,5 +1,5 @@
 import type { Probot } from "probot";
-import { buildSummaryComment } from "../comment.js";
+import { buildSummaryComment, buildDegradedComment } from "../comment.js";
 import { loadRepoConfig } from "../config.js";
 import {
   checkRateLimit,
@@ -13,6 +13,7 @@ import { buildEmbeddingInput, createOpenAIClient, getEmbedding } from "../embed.
 import { findDuplicates } from "../dedup.js";
 import { withGitHubRetry } from "../github.js";
 import { applyLabels, ensureLabels } from "../labels.js";
+import { inc } from "../metrics.js";
 import { scorePRQuality } from "../quality.js";
 import type {
   AnalysisRecord,
@@ -48,7 +49,7 @@ async function fetchContributorMergedPRs(
     );
     return (result as { data: { total_count: number } }).data.total_count ?? 0;
   } catch (error) {
-    log.warn(`Failed to fetch merged PR count for ${author}: ${error}`);
+    log.warn({ repo: `${owner}/${repo}`, author, action: "fetch_merged_prs" }, `Failed to fetch merged PR count for ${author}`);
     return 0;
   }
 }
@@ -76,7 +77,10 @@ async function fetchPRDiffSummary(context: {
   });
 
   if (totalLines > context.maxLines) {
-    context.log.warn(`PR #${context.pullNumber} has ${totalLines} lines — truncating diff`);
+    context.log.warn(
+      { repo: `${context.owner}/${context.repo}`, number: context.pullNumber, totalLines, action: "diff_truncated" },
+      `PR #${context.pullNumber} has ${totalLines} lines — truncating diff`
+    );
   }
 
   return {
@@ -138,23 +142,23 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
   const author = payload.pull_request.user.login;
   const db = getDb();
 
-  log.info(`Processing PR #${number} in ${fullRepo} by ${author}`);
+  log.info({ repo: fullRepo, number, author, action: "pr.start" }, `Processing PR #${number} in ${fullRepo} by ${author}`);
 
   const config = await loadRepoConfig({ octokit: context.octokit, owner, repo });
 
   if (config.trusted_users.includes(author)) {
-    log.info(`Skipping trusted user ${author}`);
+    log.info({ repo: fullRepo, number, author, action: "pr.skip_trusted" }, `Skipping trusted user ${author}`);
     return;
   }
 
   if (config.skip_bots && isBot(author, payload.pull_request.user.type)) {
-    log.info(`Skipping bot user ${author}`);
+    log.info({ repo: fullRepo, number, author, action: "pr.skip_bot" }, `Skipping bot user ${author}`);
     return;
   }
 
   // Rate limit check
   if (!checkRateLimit(db, fullRepo, OPENAI_BUDGET_PER_HOUR)) {
-    log.warn(`Rate limit exceeded for ${fullRepo} — skipping OpenAI calls`);
+    log.warn({ repo: fullRepo, number, action: "pr.rate_limited" }, `Rate limit exceeded for ${fullRepo} — skipping OpenAI calls`);
     return;
   }
 
@@ -171,21 +175,36 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
   });
 
   if (totalLines > config.max_diff_lines) {
-    log.warn(`PR #${number} has ${totalLines} diff lines (max ${config.max_diff_lines}) — limited analysis`);
+    log.warn({ repo: fullRepo, number, totalLines, maxLines: config.max_diff_lines, action: "pr.large_diff" }, `PR #${number} has ${totalLines} diff lines — limited analysis`);
   }
 
   const files = await context.octokit.pulls.listFiles({ owner, repo, pull_number: number, per_page: 100 });
   const hasTests = files.data.some((file: { filename: string }) => /(^test\/|\.test\.|\.spec\.)/i.test(file.filename));
   const ciPassing = checks.data.check_runs.length === 0 || checks.data.check_runs.every((run: { conclusion: string | null }) => run.conclusion === "success");
 
-  const openaiClient = createOpenAIClient();
+  // Attempt OpenAI embedding — graceful degradation if OpenAI is down
+  let openaiClient;
+  try {
+    openaiClient = createOpenAIClient();
+  } catch {
+    // OPENAI_API_KEY missing or invalid — degrade gracefully
+    log.warn({ repo: fullRepo, number, action: "pr.openai_unavailable" }, "OpenAI client creation failed — degrading gracefully");
+    await handleDegradedPR({ context, config, owner, repo, number, log });
+    inc("openai_degraded_total");
+    inc("prs_analyzed_total");
+    return;
+  }
 
   const body = normalizeBody(payload.pull_request.body);
   const input = buildEmbeddingInput(payload.pull_request.title, body, diffSummary);
   const embedding = await getEmbedding(input, openaiClient, undefined, log);
+  inc("openai_calls_total");
 
   if (embedding.length === 0) {
-    log.warn(`Embedding generation failed for PR #${number} — skipping analysis`);
+    log.warn({ repo: fullRepo, number, action: "pr.embedding_failed" }, `Embedding generation failed for PR #${number} — degrading gracefully`);
+    await handleDegradedPR({ context, config, owner, repo, number, log });
+    inc("openai_degraded_total");
+    inc("prs_analyzed_total");
     return;
   }
 
@@ -201,6 +220,9 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
   upsertEmbedding(db, record);
 
   const duplicates = findDuplicates(record, listEmbeddings(db, fullRepo), config.duplicate_threshold);
+  if (duplicates.length > 0) {
+    inc("duplicates_found_total", duplicates.length);
+  }
 
   const contributorMergedPRs = await fetchContributorMergedPRs(context.octokit, owner, repo, author, log);
 
@@ -218,17 +240,21 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
     ciPassing
   }, config.quality_thresholds);
 
-  const vision: VisionEvaluation = config.vision
-    ? await evaluateVision({
-        client: openaiClient,
-        model: config.vision_model,
-        vision: config.vision,
-        title: payload.pull_request.title,
-        body,
-        diffSummary,
-        logger: log
-      })
-    : { score: 0.5, aligned: true, reasoning: "No vision configured", recommendation: "review" };
+  let vision: VisionEvaluation;
+  if (config.vision) {
+    vision = await evaluateVision({
+      client: openaiClient,
+      model: config.vision_model,
+      vision: config.vision,
+      title: payload.pull_request.title,
+      body,
+      diffSummary,
+      logger: log
+    });
+    inc("openai_calls_total");
+  } else {
+    vision = { score: 0.5, aligned: true, reasoning: "No vision configured", recommendation: "review" };
+  }
 
   const bestPRNumber = pickBestPR(number, duplicates, quality, db, fullRepo);
 
@@ -264,7 +290,7 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
       labels: [...new Set(labelsToApply)]
     });
   } else {
-    log.info(`[DRY RUN] Would apply labels: ${labelsToApply.join(", ")}`);
+    log.info({ repo: fullRepo, number, labels: labelsToApply, action: "pr.dry_run_labels" }, `[DRY RUN] Would apply labels: ${labelsToApply.join(", ")}`);
   }
 
   const summary = buildSummaryComment({
@@ -284,5 +310,46 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
     log
   });
 
-  log.info(`PRGuard analyzed PR #${number} in ${fullRepo} — quality=${quality.score.toFixed(2)} vision=${vision.score.toFixed(2)}`);
+  inc("prs_analyzed_total");
+  log.info(
+    { repo: fullRepo, number, quality: quality.score, vision: vision.score, duplicates: duplicates.length, action: "pr.complete" },
+    `PRGuard analyzed PR #${number} in ${fullRepo} — quality=${quality.score.toFixed(2)} vision=${vision.score.toFixed(2)}`
+  );
+}
+
+/** Handle a PR when OpenAI is unavailable — apply needs_review label + degraded comment. */
+async function handleDegradedPR(params: {
+  context: { octokit: any };
+  config: PRGuardConfig;
+  owner: string;
+  repo: string;
+  number: number;
+  log: Logger;
+}): Promise<void> {
+  const { context, config, owner, repo, number, log } = params;
+
+  if (!config.dry_run) {
+    await ensureLabels({ octokit: context.octokit, owner, repo, labels: config.labels });
+    await applyLabels({
+      octokit: context.octokit,
+      owner,
+      repo,
+      issueNumber: number,
+      labels: [config.labels.needs_review]
+    });
+  }
+
+  const summary = buildDegradedComment();
+
+  await upsertSummaryComment({
+    octokit: context.octokit,
+    owner,
+    repo,
+    issueNumber: number,
+    body: summary,
+    dryRun: config.dry_run,
+    log
+  });
+
+  log.warn({ repo: `${owner}/${repo}`, number, action: "pr.degraded" }, `Posted degraded comment for PR #${number}`);
 }

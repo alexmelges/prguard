@@ -85,3 +85,17 @@ export function buildSummaryComment(params: {
 
   return `${parts.join("\n")}\n`;
 }
+
+/** Comment posted when OpenAI is unavailable (graceful degradation). */
+export function buildDegradedComment(): string {
+  return [
+    MARKER,
+    "## 🛡️ PRGuard Triage Summary\n",
+    "⚠️ **Automated analysis is temporarily unavailable.** The AI service could not be reached.",
+    "",
+    "A maintainer will need to review this manually. PRGuard has applied the `needs-review` label.",
+    "",
+    "---",
+    "<sub>🤖 <a href=\"https://github.com/apps/prguard\">PRGuard</a> · automated triage (degraded)</sub>"
+  ].join("\n") + "\n";
+}
