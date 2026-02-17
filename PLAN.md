@@ -25,39 +25,24 @@
 | Item | Status | Files |
 |------|--------|-------|
 | Proper logging (Probot logger) | ✅ | `src/index.ts` — `app.log` throughout |
-| CLI backfill command | ⬚ | `src/cli.ts` (new) |
-| Webhook signature verification docs | ⬚ | `README.md` |
+| CLI backfill command | ✅ | `src/cli.ts` + `@octokit/rest` |
+| Webhook signature verification docs | ✅ | `README.md` |
 | `.env.example` | ✅ | `.env.example` |
-| README with deploy instructions | ⬚ | `README.md` — needs full rewrite |
+| README with deploy instructions | ✅ | `README.md` — full rewrite with deploy guide |
 | GitHub Actions CI | ✅ | `.github/workflows/ci.yml` |
 | Beautiful summary comment | ✅ | `src/comment.ts` — emojis, tables, sections |
 | Configurable quality thresholds | ✅ | `src/types.ts`, `src/config.ts`, `src/quality.ts` |
 | Dry run mode | ✅ | `src/config.ts`, `src/index.ts` |
 | Edge cases (empty PRs, no body, massive diffs, bots) | ✅ | `src/index.ts` — guards for all |
-| GitHub API rate limiting awareness | ⬚ | Need to handle 403/rate-limit on GitHub calls |
+| GitHub API rate limiting awareness | ✅ | `src/github.ts` — `withGitHubRetry()` with retry-after |
 | Tests for new functionality | ✅ | `test/db.test.ts`, `test/config.test.ts`, `test/comment.test.ts`, `test/embed.test.ts` |
 
-## Remaining Work (Phase 2)
+## Completed Work
 
-### Priority 1: CLI backfill
-- New `src/cli.ts` — takes `owner/repo`, iterates open PRs/issues, embeds them
-- Add `"backfill"` script to package.json
-- Needs Octokit standalone (not Probot context)
-
-### Priority 2: README rewrite
-- Deployment guide (Docker, Railway, Fly.io)
-- Webhook signature verification
-- Config reference with all options
-- Screenshot/example of comment format
-
-### Priority 3: GitHub API rate awareness
-- Wrap GitHub API calls in try/catch for 403 secondary rate limits
-- Add retry-after header handling
-
-### Priority 4: Cleanup
-- Remove dead code
-- Ensure `.dockerignore` exists
-- Ensure `.gitignore` covers dist/, *.db, .env
+All 10 core issues resolved. All enhancement items done except:
+- Could add more granular GitHub API wrapping (currently only search call is wrapped)
+- Could add E2E test with mocked Probot context
+- Could add Fly.io `fly.toml` template
 
 ## Decisions Made
 
@@ -70,5 +55,8 @@
 
 ## Lessons
 
-- Should have planned before coding — the first pass produced a dead `pickBestPR` function with a `require()` call that needed cleanup
-- Comment formatting matters — the table format for duplicates is much more readable than bullet lists
+- **Plan before coding** — the first pass produced a dead `pickBestPR` function with a `require()` call that needed cleanup. Planning would have caught the dependency between getAnalysis import and the function.
+- **Comment formatting matters** — table format for duplicates is much more readable than bullet lists
+- **Probot's CMD** — Dockerfile needs `npx probot run`, not `node dist/index.js`
+- **Type safety with wrappers** — `withGitHubRetry` returns `unknown` generic which means destructuring needs explicit casting at call sites
+- **Test execution time** — the GitHub retry test takes ~1s due to real `setTimeout` delays; consider mocking timers if test suite grows
