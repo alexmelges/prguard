@@ -66,6 +66,8 @@ export interface PRGuardConfig {
   deep_review: boolean;
   review_model: string;
   max_diff_tokens: number;
+  daily_limit: number;
+  openai_api_key: string;
 }
 
 export interface CodeReview {

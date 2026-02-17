@@ -103,6 +103,13 @@ export function migrate(db: Database.Database): void {
       openai_calls INTEGER NOT NULL DEFAULT 0,
       UNIQUE(repo, hour)
     );
+
+    CREATE TABLE IF NOT EXISTS installation_rate_limits (
+      installation_id INTEGER NOT NULL,
+      date TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (installation_id, date)
+    );
   `);
 
   // Migration: add active column if missing

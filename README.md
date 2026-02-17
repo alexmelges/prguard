@@ -15,7 +15,8 @@ PRGuard is a GitHub App that helps maintainers manage high-volume repositories. 
 - **🧹 Automatic Cleanup** — Deactivates embeddings when PRs/issues are closed
 - **🤖 Bot Filtering** — Skip bot PRs (Dependabot, Renovate, etc.)
 - **🏃 Dry Run Mode** — Test without posting comments or labels
-- **⚡ Rate Limiting** — Per-repo hourly budget for OpenAI calls
+- **⚡ Rate Limiting** — Per-installation daily budget + per-repo hourly budget for OpenAI calls
+- **🔑 BYOK (Bring Your Own Key)** — Repos can provide their own OpenAI API key
 
 ## 📋 How It Works
 
@@ -122,9 +123,70 @@ labels:
   on_track: "prguard:on-track"
   needs_review: "prguard:needs-review"
   recommended: "prguard:recommended"
+
+# Maximum analyses per installation per day (default: 50)
+daily_limit: 50
+
+# BYOK: Provide your own OpenAI API key (empty = use server default)
+openai_api_key: ""
 ```
 
 All fields are optional — sensible defaults are used when not specified.
+
+## 🔑 BYOK (Bring Your Own Key)
+
+Repos can provide their own OpenAI API key to avoid consuming the server's quota. Add this to `.github/prguard.yml`:
+
+```yaml
+openai_api_key: sk-your-key-here
+```
+
+When set, PRGuard uses this key for all OpenAI API calls (embeddings, vision, code review) for that repo instead of the server default.
+
+> ⚠️ **Security Warning:** The API key in `.github/prguard.yml` is visible to anyone with read access to the repository. Only use BYOK with:
+> - **Public repos** where you accept the key is visible
+> - **Restricted API keys** with usage limits set in your OpenAI dashboard
+> - **Private repos** where you trust all collaborators
+>
+> Never put an unrestricted, high-limit API key in a public repo config file.
+
+## ⏱️ Rate Limits
+
+PRGuard enforces two layers of rate limiting to prevent runaway costs:
+
+### Per-Installation Daily Limit
+
+Each GitHub App installation gets a daily budget of analyses (default: 50). When exceeded, PRGuard posts a comment:
+
+> ⚠️ **PRGuard daily analysis limit reached** (50/50). Resets at midnight UTC.
+
+Configure via `.github/prguard.yml`:
+
+```yaml
+daily_limit: 100  # Increase to 100 analyses per day
+```
+
+### Per-Repo Hourly Limit
+
+An additional hourly rate limit (60 OpenAI calls per repo per hour) prevents burst abuse. This is not configurable.
+
+## 💰 Cost Estimation
+
+PRGuard uses OpenAI APIs. Approximate costs per analysis:
+
+| API Call | Model | Cost |
+|----------|-------|------|
+| Embedding | `text-embedding-3-small` | ~$0.00002 per PR/issue |
+| Vision alignment | `gpt-4o-mini` | ~$0.001 per PR |
+| Deep code review | `gpt-4o-mini` | ~$0.002 per PR |
+
+**Estimated monthly cost** for a repo with 100 PRs + 200 issues/month:
+- Embeddings: 300 × $0.00002 = ~$0.006
+- Vision (PRs only): 100 × $0.001 = ~$0.10
+- Code review (PRs only): 100 × $0.002 = ~$0.20
+- **Total: ~$0.31/month**
+
+With the default daily limit of 50, maximum monthly cost is capped at ~$4.65 per installation.
 
 ## 🏷️ Labels
 

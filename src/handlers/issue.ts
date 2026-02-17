@@ -13,6 +13,7 @@ import { findDuplicates } from "../dedup.js";
 import { applyLabels, ensureLabels } from "../labels.js";
 import { inc } from "../metrics.js";
 import type { AnalysisRecord, EmbeddingRecord } from "../types.js";
+import { checkInstallationRateLimit, incrementInstallationRateLimit } from "../rate-limit.js";
 import {
   isBot,
   normalizeBody,
@@ -31,6 +32,7 @@ export async function handleIssue(app: Probot, context: { octokit: any; payload:
       pull_request?: unknown;
     };
     repository: { name: string; owner: { login: string } };
+    installation?: { id: number };
   };
 
   if (payload.issue.pull_request) return;
@@ -56,6 +58,25 @@ export async function handleIssue(app: Probot, context: { octokit: any; payload:
     return;
   }
 
+  // Per-installation daily rate limit check
+  const installationId = payload.installation?.id;
+  if (installationId) {
+    const rateLimit = checkInstallationRateLimit(db, installationId, config.daily_limit);
+    if (!rateLimit.allowed) {
+      log.warn({ repo: fullRepo, number, installationId, action: "issue.daily_limit" }, `Daily analysis limit reached for installation ${installationId}`);
+      await upsertSummaryComment({
+        octokit: context.octokit,
+        owner,
+        repo,
+        issueNumber: number,
+        body: `⚠️ **PRGuard daily analysis limit reached** (${rateLimit.used}/${config.daily_limit}). Resets at midnight UTC.`,
+        dryRun: config.dry_run,
+        log
+      });
+      return;
+    }
+  }
+
   if (!checkRateLimit(db, fullRepo, OPENAI_BUDGET_PER_HOUR)) {
     log.warn({ repo: fullRepo, number, action: "issue.rate_limited" }, `Rate limit exceeded for ${fullRepo} — skipping`);
     return;
@@ -66,9 +87,12 @@ export async function handleIssue(app: Probot, context: { octokit: any; payload:
   }
 
   // Attempt OpenAI — graceful degradation
+  // BYOK: use repo-provided API key if configured
   let openaiClient;
   try {
-    openaiClient = createOpenAIClient();
+    openaiClient = config.openai_api_key
+      ? createOpenAIClient(config.openai_api_key)
+      : createOpenAIClient();
   } catch {
     log.warn({ repo: fullRepo, number, action: "issue.openai_unavailable" }, "OpenAI client creation failed — degrading gracefully");
     await handleDegradedIssue({ context, config, owner, repo, number, log });
@@ -152,6 +176,11 @@ export async function handleIssue(app: Probot, context: { octokit: any; payload:
     dryRun: config.dry_run,
     log
   });
+
+  // Increment daily rate limit counter
+  if (installationId) {
+    incrementInstallationRateLimit(db, installationId);
+  }
 
   inc("issues_analyzed_total");
   log.info({ repo: fullRepo, number, duplicates: duplicates.length, action: "issue.complete" }, `PRGuard analyzed issue #${number} in ${fullRepo}`);

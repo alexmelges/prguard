@@ -22,7 +22,9 @@ export const defaultConfig: PRGuardConfig = {
   skip_bots: true,
   deep_review: true,
   review_model: "gpt-4o-mini",
-  max_diff_tokens: 8000
+  max_diff_tokens: 8000,
+  daily_limit: 50,
+  openai_api_key: ""
 };
 
 export function parseConfig(yamlText: string): PRGuardConfig {
@@ -46,7 +48,9 @@ export function parseConfig(yamlText: string): PRGuardConfig {
     skip_bots: parsed.skip_bots ?? defaultConfig.skip_bots,
     deep_review: parsed.deep_review ?? defaultConfig.deep_review,
     review_model: parsed.review_model ?? defaultConfig.review_model,
-    max_diff_tokens: parsed.max_diff_tokens ?? defaultConfig.max_diff_tokens
+    max_diff_tokens: parsed.max_diff_tokens ?? defaultConfig.max_diff_tokens,
+    daily_limit: parsed.daily_limit ?? defaultConfig.daily_limit,
+    openai_api_key: parsed.openai_api_key ?? defaultConfig.openai_api_key
   };
 }
 

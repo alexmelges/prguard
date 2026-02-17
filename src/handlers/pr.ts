@@ -28,6 +28,7 @@ import type {
 } from "../types.js";
 import { evaluateVision } from "../vision.js";
 import { reviewPR, buildCrossComparison } from "../review.js";
+import { checkInstallationRateLimit, incrementInstallationRateLimit } from "../rate-limit.js";
 import {
   isBot,
   normalizeBody,
@@ -159,6 +160,7 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
       head: { sha: string };
     };
     repository: { name: string; owner: { login: string } };
+    installation?: { id: number };
   };
 
   const owner = payload.repository.owner.login;
@@ -180,6 +182,25 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
   if (config.skip_bots && isBot(author, payload.pull_request.user.type)) {
     log.info({ repo: fullRepo, number, author, action: "pr.skip_bot" }, `Skipping bot user ${author}`);
     return;
+  }
+
+  // Per-installation daily rate limit check
+  const installationId = payload.installation?.id;
+  if (installationId) {
+    const rateLimit = checkInstallationRateLimit(db, installationId, config.daily_limit);
+    if (!rateLimit.allowed) {
+      log.warn({ repo: fullRepo, number, installationId, action: "pr.daily_limit" }, `Daily analysis limit reached for installation ${installationId}`);
+      await upsertSummaryComment({
+        octokit: context.octokit,
+        owner,
+        repo,
+        issueNumber: number,
+        body: `⚠️ **PRGuard daily analysis limit reached** (${rateLimit.used}/${config.daily_limit}). Resets at midnight UTC.`,
+        dryRun: config.dry_run,
+        log
+      });
+      return;
+    }
   }
 
   // Rate limit check
@@ -209,9 +230,12 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
   const ciPassing = checks.data.check_runs.length === 0 || checks.data.check_runs.every((run: { conclusion: string | null }) => run.conclusion === "success");
 
   // Attempt OpenAI embedding — graceful degradation if OpenAI is down
+  // BYOK: use repo-provided API key if configured, otherwise fall back to server default
   let openaiClient;
   try {
-    openaiClient = createOpenAIClient();
+    openaiClient = config.openai_api_key
+      ? createOpenAIClient(config.openai_api_key)
+      : createOpenAIClient();
   } catch {
     // OPENAI_API_KEY missing or invalid — degrade gracefully
     log.warn({ repo: fullRepo, number, action: "pr.openai_unavailable" }, "OpenAI client creation failed — degrading gracefully");
@@ -373,6 +397,11 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
     dryRun: config.dry_run,
     log
   });
+
+  // Increment daily rate limit counter
+  if (installationId) {
+    incrementInstallationRateLimit(db, installationId);
+  }
 
   inc("prs_analyzed_total");
   log.info(
