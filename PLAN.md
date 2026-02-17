@@ -53,6 +53,22 @@ All 10 core issues resolved. All enhancement items done except:
 5. **`withRetry` in embed.ts** — shared by both embedding and vision calls
 6. **Bot detection by `[bot]` suffix** — covers GitHub Apps + Dependabot/Renovate
 
+## Review Scores
+
+Reviewed 2026-02-17. 46 tests passing, TypeScript clean.
+
+| Dimension | Score | Notes |
+|-----------|-------|-------|
+| **Code quality** | 8/10 | Clean split into handlers, good separation of concerns. Types are solid. Minor: some `any` types on octokit params. |
+| **Test coverage** | 7/10 | 46 unit + integration tests covering core logic, edge cases, and rate limiting. Missing: full handler-level tests with mocked Probot context, E2E webhook test. |
+| **Documentation** | 7/10 | Good README, .env.example, app.yml. Missing: inline JSDoc on exported functions, architecture diagram. |
+| **Deployment** | 8/10 | Dockerfile works (multi-stage, native deps handled), docker-compose, volume for SQLite. Missing: fly.toml, health check endpoint. |
+| **Feature completeness** | 8/10 | Core loop solid: dedup, quality scoring, vision alignment, labels, comments, backfill CLI. Missing: webhook for PR reopened, configurable comment verbosity. |
+| **Operational readiness** | 6/10 | Rate limiting, graceful degradation on API failures, retry with backoff. Missing: metrics/observability, structured logging, alerting, DB cleanup cron for old rate_limits rows. |
+| **DX** | 7/10 | Clean scripts, vitest, TSX for CLI. Missing: `npm run dev` with smee.io proxy, contributing guide. |
+
+**Overall: 7.3/10** — Production-viable for a v0.1. Key gaps are observability and handler-level test coverage.
+
 ## Lessons
 
 - **Plan before coding** — the first pass produced a dead `pickBestPR` function with a `require()` call that needed cleanup. Planning would have caught the dependency between getAnalysis import and the function.
