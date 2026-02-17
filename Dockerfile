@@ -19,9 +19,9 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=builder /app/dist/ dist/
 
 # Data directory for SQLite persistence
+# On Railway: attach a volume mounted at /data via the dashboard
 RUN mkdir -p /data
 ENV DATABASE_PATH=/data/prguard.db
-VOLUME /data
 
 EXPOSE 3000
 ENV PORT=3000
