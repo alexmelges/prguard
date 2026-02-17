@@ -163,6 +163,31 @@ PRGuard posts a single comment per PR/issue that looks like:
 PR #45 appears to be the strongest implementation.
 ```
 
+## 📡 Observability
+
+### Health Check
+
+```
+GET /healthz → { "status": "ok", "db": "connected" }
+```
+
+Returns 200 when healthy, 503 when DB is unavailable.
+
+### Metrics
+
+```
+GET /metrics → Prometheus text format
+```
+
+Exposes counters: `prguard_prs_analyzed_total`, `prguard_issues_analyzed_total`, `prguard_duplicates_found_total`, `prguard_openai_calls_total`, `prguard_errors_total`, `prguard_openai_degraded_total`.
+
+### Graceful Degradation
+
+If OpenAI is unavailable, PRGuard continues to function:
+- Applies `needs-review` label
+- Posts a comment explaining automated analysis is temporarily unavailable
+- Maintainers can review manually until the service recovers
+
 ## 🔧 CLI — Backfill Existing Data
 
 To embed all existing open PRs and issues for a repo:

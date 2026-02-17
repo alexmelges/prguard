@@ -55,19 +55,19 @@ All 10 core issues resolved. All enhancement items done except:
 
 ## Review Scores
 
-Reviewed 2026-02-17. 46 tests passing, TypeScript clean.
+Reviewed 2026-02-17 (iteration 3). 75 tests passing, TypeScript clean.
 
 | Dimension | Score | Notes |
 |-----------|-------|-------|
-| **Code quality** | 8/10 | Clean split into handlers, good separation of concerns. Types are solid. Minor: some `any` types on octokit params. |
-| **Test coverage** | 7/10 | 46 unit + integration tests covering core logic, edge cases, and rate limiting. Missing: full handler-level tests with mocked Probot context, E2E webhook test. |
-| **Documentation** | 7/10 | Good README, .env.example, app.yml. Missing: inline JSDoc on exported functions, architecture diagram. |
-| **Deployment** | 8/10 | Dockerfile works (multi-stage, native deps handled), docker-compose, volume for SQLite. Missing: fly.toml, health check endpoint. |
-| **Feature completeness** | 8/10 | Core loop solid: dedup, quality scoring, vision alignment, labels, comments, backfill CLI. Missing: webhook for PR reopened, configurable comment verbosity. |
-| **Operational readiness** | 6/10 | Rate limiting, graceful degradation on API failures, retry with backoff. Missing: metrics/observability, structured logging, alerting, DB cleanup cron for old rate_limits rows. |
+| **Code quality** | 8/10 | Clean split into handlers, good separation of concerns. Types are solid. Structured logging throughout. Minor: some `any` types on octokit params. |
+| **Test coverage** | 8/10 | 75 tests: unit, integration, handler-level with mocked Probot context, error paths (OpenAI 500/auth, GitHub 404, rate limits), comment snapshot tests (7 scenarios). |
+| **Documentation** | 8/10 | Comprehensive README with deploy guide, observability docs, env vars, config reference. .env.example, app.yml. |
+| **Deployment** | 8/10 | Dockerfile works (multi-stage, native deps handled), docker-compose, volume for SQLite, /healthz endpoint. |
+| **Feature completeness** | 8/10 | Core loop solid: dedup, quality scoring, vision alignment, labels, comments, backfill CLI. Graceful degradation when OpenAI is down. |
+| **Operational readiness** | 8/10 | Structured logging with context, /healthz health check, /metrics Prometheus endpoint, graceful degradation, startup validation, rate limiting, retry with backoff. |
 | **DX** | 7/10 | Clean scripts, vitest, TSX for CLI. Missing: `npm run dev` with smee.io proxy, contributing guide. |
 
-**Overall: 7.3/10** — Production-viable for a v0.1. Key gaps are observability and handler-level test coverage.
+**Overall: 8.0/10** — Production-ready for a v0.1. Observability, test coverage, and graceful degradation all addressed.
 
 ## Lessons
 
