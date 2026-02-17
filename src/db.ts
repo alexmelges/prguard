@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import type { AnalysisRecord, EmbeddingRecord, ItemType } from "./types.js";
+import type { AnalysisRecord, CodeReview, EmbeddingRecord, ItemType } from "./types.js";
 
 interface EmbeddingRow {
   repo: string;
@@ -77,6 +77,21 @@ export function migrate(db: Database.Database): void {
       vision_reasoning TEXT,
       recommendation TEXT,
       pr_quality_score REAL,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(repo, type, number)
+    );
+
+    CREATE TABLE IF NOT EXISTS reviews (
+      id INTEGER PRIMARY KEY,
+      repo TEXT NOT NULL,
+      type TEXT NOT NULL,
+      number INTEGER NOT NULL,
+      summary TEXT NOT NULL,
+      quality_score REAL NOT NULL,
+      correctness_concerns TEXT,
+      scope_assessment TEXT,
+      verdict TEXT NOT NULL,
+      verdict_reasoning TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       UNIQUE(repo, type, number)
     );
@@ -202,6 +217,39 @@ export function getAnalysis(
     visionReasoning: row.vision_reasoning,
     recommendation: row.recommendation,
     prQualityScore: row.pr_quality_score
+  };
+}
+
+export function upsertReview(db: Database.Database, repo: string, type: ItemType, number: number, review: CodeReview): void {
+  db.prepare(
+    `INSERT INTO reviews (repo, type, number, summary, quality_score, correctness_concerns, scope_assessment, verdict, verdict_reasoning)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(repo, type, number)
+     DO UPDATE SET
+       summary = excluded.summary,
+       quality_score = excluded.quality_score,
+       correctness_concerns = excluded.correctness_concerns,
+       scope_assessment = excluded.scope_assessment,
+       verdict = excluded.verdict,
+       verdict_reasoning = excluded.verdict_reasoning,
+       created_at = datetime('now')`
+  ).run(repo, type, number, review.summary, review.quality_score, JSON.stringify(review.correctness_concerns), review.scope_assessment, review.verdict, review.verdict_reasoning);
+}
+
+export function getReview(db: Database.Database, repo: string, type: ItemType, number: number): CodeReview | null {
+  const row = db.prepare(
+    "SELECT summary, quality_score, correctness_concerns, scope_assessment, verdict, verdict_reasoning FROM reviews WHERE repo = ? AND type = ? AND number = ?"
+  ).get(repo, type, number) as { summary: string; quality_score: number; correctness_concerns: string; scope_assessment: string; verdict: string; verdict_reasoning: string } | undefined;
+
+  if (!row) return null;
+
+  return {
+    summary: row.summary,
+    quality_score: row.quality_score,
+    correctness_concerns: JSON.parse(row.correctness_concerns ?? "[]") as string[],
+    scope_assessment: row.scope_assessment,
+    verdict: row.verdict as CodeReview["verdict"],
+    verdict_reasoning: row.verdict_reasoning
   };
 }
 

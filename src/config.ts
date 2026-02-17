@@ -19,7 +19,10 @@ export const defaultConfig: PRGuardConfig = {
   },
   max_diff_lines: 10000,
   dry_run: false,
-  skip_bots: true
+  skip_bots: true,
+  deep_review: true,
+  review_model: "gpt-4o-mini",
+  max_diff_tokens: 8000
 };
 
 export function parseConfig(yamlText: string): PRGuardConfig {
@@ -40,7 +43,10 @@ export function parseConfig(yamlText: string): PRGuardConfig {
     },
     max_diff_lines: parsed.max_diff_lines ?? defaultConfig.max_diff_lines,
     dry_run: parsed.dry_run ?? defaultConfig.dry_run,
-    skip_bots: parsed.skip_bots ?? defaultConfig.skip_bots
+    skip_bots: parsed.skip_bots ?? defaultConfig.skip_bots,
+    deep_review: parsed.deep_review ?? defaultConfig.deep_review,
+    review_model: parsed.review_model ?? defaultConfig.review_model,
+    max_diff_tokens: parsed.max_diff_tokens ?? defaultConfig.max_diff_tokens
   };
 }
 

@@ -9,6 +9,19 @@ vi.mock("../../src/embed.js", () => ({
   createOpenAIClient: () => ({}),
   buildEmbeddingInput: (title: string, body: string, diff = "") => `${title}\n${body}\n${diff}`,
   getEmbedding: vi.fn().mockResolvedValue([0.1, 0.2, 0.3, 0.4, 0.5]),
+  withRetry: vi.fn().mockImplementation((fn: () => Promise<unknown>) => fn()),
+}));
+
+vi.mock("../../src/review.js", () => ({
+  reviewPR: vi.fn().mockResolvedValue({
+    summary: "This PR adds a feature",
+    quality_score: 7,
+    correctness_concerns: [],
+    scope_assessment: "Focused",
+    verdict: "approve",
+    verdict_reasoning: "Looks good",
+  }),
+  buildCrossComparison: vi.fn().mockReturnValue(""),
 }));
 
 vi.mock("../../src/vision.js", () => ({

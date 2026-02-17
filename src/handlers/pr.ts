@@ -5,9 +5,11 @@ import {
   checkRateLimit,
   getAnalysis,
   getDb,
+  getReview,
   listEmbeddings,
   upsertAnalysis,
-  upsertEmbedding
+  upsertEmbedding,
+  upsertReview
 } from "../db.js";
 import { buildEmbeddingInput, createOpenAIClient, getEmbedding } from "../embed.js";
 import { findDuplicates } from "../dedup.js";
@@ -17,6 +19,7 @@ import { inc } from "../metrics.js";
 import { scorePRQuality } from "../quality.js";
 import type {
   AnalysisRecord,
+  CodeReview,
   DuplicateMatch,
   EmbeddingRecord,
   PRGuardConfig,
@@ -24,6 +27,7 @@ import type {
   VisionEvaluation
 } from "../types.js";
 import { evaluateVision } from "../vision.js";
+import { reviewPR, buildCrossComparison } from "../review.js";
 import {
   isBot,
   normalizeBody,
@@ -90,24 +94,46 @@ async function fetchPRDiffSummary(context: {
 }
 
 /**
- * Pick the best PR among duplicates by comparing quality scores.
+ * Pick the best PR among duplicates using weighted scoring.
+ * Weights: code review 40%, quality 30%, vision 30%.
  */
 function pickBestPR(
   currentNumber: number,
   duplicates: DuplicateMatch[],
   currentQuality: PRQualityResult,
+  currentVision: VisionEvaluation | null,
+  currentReview: CodeReview | null,
   db: import("better-sqlite3").Database,
   fullRepo: string
 ): number {
   const prCandidates = duplicates.filter((item) => item.type === "pr");
   if (prCandidates.length === 0) return currentNumber;
 
+  function compositeScore(
+    qualityScore: number,
+    visionScore: number | null,
+    reviewScore: number | null
+  ): number {
+    const rNorm = reviewScore != null ? reviewScore / 10 : 0.5;
+    const vNorm = visionScore ?? 0.5;
+    return 0.4 * rNorm + 0.3 * qualityScore + 0.3 * vNorm;
+  }
+
   let bestNumber = currentNumber;
-  let bestScore = currentQuality.score;
+  let bestScore = compositeScore(
+    currentQuality.score,
+    currentVision?.score ?? null,
+    currentReview?.quality_score ?? null
+  );
 
   for (const candidate of prCandidates) {
     const analysis = getAnalysis(db, fullRepo, "pr", candidate.number);
-    const candidateScore = analysis?.prQualityScore ?? 0;
+    const review = getReview(db, fullRepo, "pr", candidate.number);
+    const candidateScore = compositeScore(
+      analysis?.prQualityScore ?? 0,
+      analysis?.visionScore ?? null,
+      review?.quality_score ?? null
+    );
     if (candidateScore > bestScore) {
       bestScore = candidateScore;
       bestNumber = candidate.number;
@@ -256,7 +282,43 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
     vision = { score: 0.5, aligned: true, reasoning: "No vision configured", recommendation: "review" };
   }
 
-  const bestPRNumber = pickBestPR(number, duplicates, quality, db, fullRepo);
+  // Deep code review (LLM-powered)
+  let codeReview: CodeReview | null = null;
+  if (config.deep_review) {
+    // Build full diff for review (larger than the summary used for embeddings)
+    const fullDiffChunks = files.data.map((file: { filename: string; patch?: string }) =>
+      `--- ${file.filename}\n${file.patch ?? ""}`
+    );
+    const fullDiff = fullDiffChunks.join("\n").slice(0, config.max_diff_tokens * 4); // ~4 chars per token
+
+    codeReview = await reviewPR({
+      client: openaiClient,
+      model: config.review_model,
+      title: payload.pull_request.title,
+      body,
+      diff: fullDiff,
+      logger: log
+    });
+    if (codeReview) {
+      upsertReview(db, fullRepo, "pr", number, codeReview);
+      inc("openai_calls_total");
+    }
+  }
+
+  // Cross-PR comparison
+  let crossComparison: string | null = null;
+  if (codeReview && duplicates.length > 0) {
+    const dupReviews: Array<{ number: number; review: CodeReview }> = [];
+    for (const dup of duplicates.filter((d) => d.type === "pr")) {
+      const stored = getReview(db, fullRepo, "pr", dup.number);
+      if (stored) dupReviews.push({ number: dup.number, review: stored });
+    }
+    if (dupReviews.length > 0) {
+      crossComparison = buildCrossComparison(number, codeReview, dupReviews);
+    }
+  }
+
+  const bestPRNumber = pickBestPR(number, duplicates, quality, vision, codeReview, db, fullRepo);
 
   const labelsToApply = [config.labels.needs_review];
   if (duplicates.length > 0) {
@@ -297,7 +359,9 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
     duplicates,
     vision: config.vision ? vision : null,
     quality,
-    bestPRNumber: duplicates.length > 0 ? bestPRNumber : null
+    bestPRNumber: duplicates.length > 0 ? bestPRNumber : null,
+    review: codeReview,
+    crossComparison
   });
 
   await upsertSummaryComment({

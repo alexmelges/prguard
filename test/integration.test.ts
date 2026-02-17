@@ -41,7 +41,9 @@ describe("integration", () => {
       duplicates: stored?.duplicates ?? [],
       vision: { score: 0.8, aligned: true, reasoning: "Aligned", recommendation: "approve" },
       quality: { score: 0.82, recommendation: "approve", reasons: [] },
-      bestPRNumber: 5
+      bestPRNumber: 5,
+      review: null,
+      crossComparison: null
     });
 
     expect(comment).toContain("PRGuard Triage Summary");

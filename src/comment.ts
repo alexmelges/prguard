@@ -1,4 +1,4 @@
-import type { DuplicateMatch, PRQualityResult, VisionEvaluation } from "./types.js";
+import type { CodeReview, DuplicateMatch, PRQualityResult, VisionEvaluation } from "./types.js";
 
 const MARKER = "<!-- prguard:summary -->";
 
@@ -40,13 +40,33 @@ export function buildSummaryComment(params: {
   vision: VisionEvaluation | null;
   quality: PRQualityResult | null;
   bestPRNumber: number | null;
+  review: CodeReview | null;
+  crossComparison: string | null;
 }): string {
   const parts = [
     MARKER,
-    "## 🛡️ PRGuard Triage Summary\n",
+    "## 🛡️ PRGuard Triage Summary\n"
+  ];
+
+  if (params.review) {
+    parts.push(
+      "### 📝 Code Review",
+      `> ${params.review.summary}`,
+      "",
+      `- **Code Quality:** ${qualityEmoji(params.review.quality_score / 10)} ${params.review.quality_score}/10`,
+      `- **Scope:** ${params.review.scope_assessment}`,
+      `- **Verdict:** ${recommendationEmoji(params.review.verdict)} ${params.review.verdict} — ${params.review.verdict_reasoning}`
+    );
+    if (params.review.correctness_concerns.length > 0) {
+      parts.push(`- **Concerns:** ${params.review.correctness_concerns.map((c) => `⚠️ ${c}`).join("; ")}`);
+    }
+    parts.push("");
+  }
+
+  parts.push(
     "### 🔍 Duplicate Check",
     formatDuplicateSection(params.duplicates)
-  ];
+  );
 
   if (params.vision) {
     const vEmoji = params.vision.aligned ? "✅" : "❌";
@@ -69,6 +89,13 @@ export function buildSummaryComment(params: {
     if (params.quality.reasons.length > 0) {
       parts.push(`- **Notes:** ${params.quality.reasons.map((r) => `⚠️ ${r}`).join(", ")}`);
     }
+  }
+
+  if (params.crossComparison) {
+    parts.push(
+      "\n### ⚖️ Cross-PR Comparison",
+      params.crossComparison
+    );
   }
 
   if (params.bestPRNumber) {

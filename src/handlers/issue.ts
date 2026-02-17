@@ -138,7 +138,9 @@ export async function handleIssue(app: Probot, context: { octokit: any; payload:
     duplicates,
     vision: null,
     quality: null,
-    bestPRNumber: null
+    bestPRNumber: null,
+    review: null,
+    crossComparison: null
   });
 
   await upsertSummaryComment({

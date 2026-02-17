@@ -135,7 +135,9 @@ describe("edge cases", () => {
         duplicates: [],
         vision: null,
         quality: null,
-        bestPRNumber: null
+        bestPRNumber: null,
+      review: null,
+      crossComparison: null
       });
       expect(comment).toContain("PRGuard Triage Summary");
       expect(comment).toContain("No close duplicates found");

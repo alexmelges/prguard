@@ -63,6 +63,18 @@ export interface PRGuardConfig {
   max_diff_lines: number;
   dry_run: boolean;
   skip_bots: boolean;
+  deep_review: boolean;
+  review_model: string;
+  max_diff_tokens: number;
+}
+
+export interface CodeReview {
+  summary: string;
+  quality_score: number;
+  correctness_concerns: string[];
+  scope_assessment: string;
+  verdict: "approve" | "review" | "reject";
+  verdict_reasoning: string;
 }
 
 export interface AnalysisRecord {

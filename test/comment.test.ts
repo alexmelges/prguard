@@ -7,7 +7,9 @@ describe("buildSummaryComment", () => {
       duplicates: [{ type: "pr", number: 4, similarity: 0.91, title: "Fix parser too" }],
       vision: { score: 0.8, aligned: true, reasoning: "Aligned", recommendation: "approve" },
       quality: { score: 0.82, recommendation: "approve", reasons: [] },
-      bestPRNumber: 5
+      bestPRNumber: 5,
+      review: null,
+      crossComparison: null
     });
 
     expect(comment).toContain("🛡️");
@@ -25,7 +27,9 @@ describe("buildSummaryComment", () => {
       duplicates: [],
       vision: null,
       quality: null,
-      bestPRNumber: null
+      bestPRNumber: null,
+      review: null,
+      crossComparison: null
     });
 
     expect(comment).toContain("No close duplicates");
@@ -38,7 +42,9 @@ describe("buildSummaryComment", () => {
       duplicates: [],
       vision: null,
       quality: { score: 0.3, recommendation: "reject", reasons: ["No test changes detected", "CI is not passing"] },
-      bestPRNumber: null
+      bestPRNumber: null,
+      review: null,
+      crossComparison: null
     });
 
     expect(comment).toContain("⚠️");

@@ -7,7 +7,9 @@ import {
   deactivateEmbedding,
   checkRateLimit,
   upsertAnalysis,
-  getAnalysis
+  getAnalysis,
+  upsertReview,
+  getReview
 } from "../src/db.js";
 import type { EmbeddingRecord } from "../src/types.js";
 
@@ -93,5 +95,46 @@ describe("configurable quality thresholds", () => {
     });
     const analysis = getAnalysis(db, "o/r", "pr", 1);
     expect(analysis?.prQualityScore).toBe(0.9);
+  });
+
+});
+
+describe("reviews table", () => {
+  it("stores and retrieves reviews", () => {
+    const db = makeDb();
+    const review = {
+      summary: "Adds auth",
+      quality_score: 8,
+      correctness_concerns: ["missing null check"],
+      scope_assessment: "Focused",
+      verdict: "approve" as const,
+      verdict_reasoning: "Good code",
+    };
+    upsertReview(db, "o/r", "pr", 1, review);
+    const stored = getReview(db, "o/r", "pr", 1);
+    expect(stored).toEqual(review);
+  });
+
+  it("returns null for missing review", () => {
+    const db = makeDb();
+    expect(getReview(db, "o/r", "pr", 999)).toBeNull();
+  });
+
+  it("upserts review on conflict", () => {
+    const db = makeDb();
+    const review1 = {
+      summary: "v1",
+      quality_score: 5,
+      correctness_concerns: [],
+      scope_assessment: "ok",
+      verdict: "review" as const,
+      verdict_reasoning: "meh",
+    };
+    const review2 = { ...review1, summary: "v2", quality_score: 9 };
+    upsertReview(db, "o/r", "pr", 42, review1);
+    upsertReview(db, "o/r", "pr", 42, review2);
+    const stored = getReview(db, "o/r", "pr", 42);
+    expect(stored?.summary).toBe("v2");
+    expect(stored?.quality_score).toBe(9);
   });
 });
