@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { withRetry } from "./embed.js";
 import type { CodeReview } from "./types.js";
+import { MAX_REVIEW_DIFF_CHARS, MAX_QUALITY_SCORE } from "./constants.js";
 
 export function buildReviewPrompt(params: {
   title: string;
@@ -23,12 +24,12 @@ export function buildReviewPrompt(params: {
     `PR Description: ${params.body || "(no description)"}`,
     "",
     "Diff:",
-    params.diff.slice(0, 24000)
+    params.diff.slice(0, MAX_REVIEW_DIFF_CHARS)
   ].join("\n");
 }
 
 export function normalizeCodeReview(raw: Partial<CodeReview>): CodeReview {
-  const qualityScore = Math.max(1, Math.min(10, raw.quality_score ?? 5));
+  const qualityScore = Math.max(1, Math.min(MAX_QUALITY_SCORE, raw.quality_score ?? 5));
   return {
     summary: raw.summary ?? "No summary available",
     quality_score: qualityScore,
@@ -47,25 +48,30 @@ export async function reviewPR(params: {
   diff: string;
   logger?: { warn: (msg: string) => void };
 }): Promise<CodeReview | null> {
-  const prompt = buildReviewPrompt(params);
-  const result = await withRetry(
-    () =>
-      params.client.chat.completions.create({
-        model: params.model,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [{ role: "user", content: prompt }]
-      }),
-    { logger: params.logger }
-  );
-
-  if (!result) return null;
-
-  const text = result.choices[0]?.message?.content ?? "";
   try {
-    return normalizeCodeReview(JSON.parse(text) as Partial<CodeReview>);
-  } catch {
-    params.logger?.warn("Failed to parse code review response");
+    const prompt = buildReviewPrompt(params);
+    const result = await withRetry(
+      () =>
+        params.client.chat.completions.create({
+          model: params.model,
+          temperature: 0,
+          response_format: { type: "json_object" },
+          messages: [{ role: "user", content: prompt }]
+        }),
+      { logger: params.logger }
+    );
+
+    if (!result) return null;
+
+    const text = result.choices[0]?.message?.content ?? "";
+    try {
+      return normalizeCodeReview(JSON.parse(text) as Partial<CodeReview>);
+    } catch {
+      params.logger?.warn("Failed to parse code review response");
+      return null;
+    }
+  } catch (error) {
+    params.logger?.warn(`Code review failed: ${error}`);
     return null;
   }
 }

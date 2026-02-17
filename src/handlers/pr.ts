@@ -37,6 +37,7 @@ import {
   OPENAI_BUDGET_PER_HOUR,
   type Logger
 } from "../util.js";
+import { MS_PER_DAY } from "../constants.js";
 
 async function fetchContributorMergedPRs(
   octokit: any,
@@ -289,7 +290,7 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
     contributorMergedPRs,
     contributorAccountAgeDays: Math.max(
       0,
-      Math.floor((Date.now() - new Date(payload.pull_request.user.created_at).valueOf()) / (24 * 60 * 60 * 1000))
+      Math.floor((Date.now() - new Date(payload.pull_request.user.created_at).valueOf()) / MS_PER_DAY)
     ),
     ciPassing
   }, config.quality_thresholds);

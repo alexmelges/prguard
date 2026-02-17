@@ -40,37 +40,47 @@ export async function evaluateVision(params: {
   diffSummary: string;
   logger?: { warn: (msg: string) => void };
 }): Promise<VisionEvaluation> {
-  const prompt = buildVisionPrompt(params);
-  const result = await withRetry(
-    () =>
-      params.client.chat.completions.create({
-        model: params.model,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [{ role: "user", content: prompt }]
-      }),
-    { logger: params.logger }
-  );
-
-  if (!result) {
-    return {
-      score: 0.5,
-      aligned: true,
-      reasoning: "Vision analysis unavailable (API error)",
-      recommendation: "review"
-    };
-  }
-
-  const text = result.choices[0]?.message?.content ?? "";
-
   try {
-    const parsed = JSON.parse(text) as Partial<VisionEvaluation>;
-    return normalizeVisionEvaluation(parsed);
-  } catch {
+    const prompt = buildVisionPrompt(params);
+    const result = await withRetry(
+      () =>
+        params.client.chat.completions.create({
+          model: params.model,
+          temperature: 0,
+          response_format: { type: "json_object" },
+          messages: [{ role: "user", content: prompt }]
+        }),
+      { logger: params.logger }
+    );
+
+    if (!result) {
+      return {
+        score: 0.5,
+        aligned: true,
+        reasoning: "Vision analysis unavailable (API error)",
+        recommendation: "review"
+      };
+    }
+
+    const text = result.choices[0]?.message?.content ?? "";
+
+    try {
+      const parsed = JSON.parse(text) as Partial<VisionEvaluation>;
+      return normalizeVisionEvaluation(parsed);
+    } catch {
+      return {
+        score: 0.5,
+        aligned: true,
+        reasoning: "Vision analysis parser fallback used",
+        recommendation: "review"
+      };
+    }
+  } catch (error) {
+    params.logger?.warn(`Vision evaluation failed: ${error}`);
     return {
       score: 0.5,
       aligned: true,
-      reasoning: "Vision analysis parser fallback used",
+      reasoning: "Vision analysis unavailable (unexpected error)",
       recommendation: "review"
     };
   }
