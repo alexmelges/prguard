@@ -200,6 +200,20 @@ PRGuard automatically creates and applies these labels:
 | `prguard:off-scope` | 🟠 | Likely outside project vision |
 | `prguard:recommended` | 🔵 | Strongest implementation among duplicates |
 
+## 🎮 Slash Commands
+
+Maintainers with write access can interact with PRGuard via comments:
+
+| Command | Description |
+|---------|-------------|
+| `/prguard help` | Show available commands |
+| `/prguard review` | Force a fresh re-analysis of this PR/issue |
+| `/prguard compare #123` | Compare this PR/issue against another (similarity score) |
+| `/prguard config` | Show the repo's current PRGuard config |
+| `/prguard ignore` | Mark this PR/issue as ignored (removes labels and analysis) |
+
+Only users with write or admin access to the repository can use slash commands.
+
 ## 💬 Comment Format
 
 PRGuard posts a single comment per PR/issue that looks like:
@@ -281,7 +295,7 @@ Probot handles signature verification internally — no additional configuration
    - **Checks:** Read (for CI status)
    - **Contents:** Read (for `.github/prguard.yml`)
    - **Metadata:** Read
-3. Subscribe to events: `pull_request`, `issues`, `check_run`
+3. Subscribe to events: `pull_request`, `issues`, `issue_comment`, `check_run`
 4. Set webhook URL to `https://your-domain.com/api/github/webhooks`
 5. Generate a private key and note the App ID
 
