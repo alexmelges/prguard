@@ -5,6 +5,7 @@ import {
   checkRateLimit,
   getDb,
   listEmbeddings,
+  logEvent,
   upsertAnalysis,
   upsertEmbedding
 } from "../db.js";
@@ -55,6 +56,7 @@ export async function handleIssue(app: Probot, context: { octokit: any; payload:
 
   if (config.skip_bots && isBot(author, payload.issue.user.type)) {
     log.info({ repo: fullRepo, number, author, action: "issue.skip_bot" }, `Skipping bot user ${author}`);
+    logEvent(db, { repo: fullRepo, eventType: "issues.opened", number, action: "skipped", detail: JSON.stringify({ reason: "bot", author }) });
     return;
   }
 
@@ -80,6 +82,7 @@ export async function handleIssue(app: Probot, context: { octokit: any; payload:
   if (!checkRateLimit(db, fullRepo, OPENAI_BUDGET_PER_HOUR)) {
     log.warn({ repo: fullRepo, number, action: "issue.rate_limited" }, `Rate limit exceeded for ${fullRepo} — skipping`);
     inc("rate_limited_total");
+    logEvent(db, { repo: fullRepo, eventType: "issues.opened", number, action: "rate_limited" });
     return;
   }
 
@@ -181,6 +184,11 @@ export async function handleIssue(app: Probot, context: { octokit: any; payload:
   // Increment daily rate limit counter
   if (installationId) {
     incrementInstallationRateLimit(db, installationId);
+  }
+
+  logEvent(db, { repo: fullRepo, eventType: "issues.opened", number, action: "analyzed" });
+  if (duplicates.length > 0) {
+    logEvent(db, { repo: fullRepo, eventType: "issues.opened", number, action: "duplicate_found", detail: JSON.stringify({ count: duplicates.length }) });
   }
 
   inc("issues_analyzed_total");

@@ -7,6 +7,7 @@ import {
   getDb,
   getReview,
   listEmbeddings,
+  logEvent,
   upsertAnalysis,
   upsertEmbedding,
   upsertReview
@@ -181,6 +182,7 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
 
   if (config.skip_bots && isBot(author, payload.pull_request.user.type)) {
     log.info({ repo: fullRepo, number, author, action: "pr.skip_bot" }, `Skipping bot user ${author}`);
+    logEvent(db, { repo: fullRepo, eventType: "pull_request.opened", number, action: "skipped", detail: JSON.stringify({ reason: "bot", author }) });
     return;
   }
 
@@ -207,6 +209,7 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
   if (!checkRateLimit(db, fullRepo, OPENAI_BUDGET_PER_HOUR)) {
     log.warn({ repo: fullRepo, number, action: "pr.rate_limited" }, `Rate limit exceeded for ${fullRepo} — skipping OpenAI calls`);
     inc("rate_limited_total");
+    logEvent(db, { repo: fullRepo, eventType: "pull_request.opened", number, action: "rate_limited" });
     return;
   }
 
@@ -402,6 +405,14 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
   // Increment daily rate limit counter
   if (installationId) {
     incrementInstallationRateLimit(db, installationId);
+  }
+
+  logEvent(db, { repo: fullRepo, eventType: "pull_request.opened", number, action: "analyzed", detail: JSON.stringify({ quality: quality.score, vision: vision.score }) });
+  if (codeReview) {
+    logEvent(db, { repo: fullRepo, eventType: "pull_request.opened", number, action: "reviewed", detail: JSON.stringify({ verdict: codeReview.verdict }) });
+  }
+  if (duplicates.length > 0) {
+    logEvent(db, { repo: fullRepo, eventType: "pull_request.opened", number, action: "duplicate_found", detail: JSON.stringify({ count: duplicates.length }) });
   }
 
   inc("prs_analyzed_total");

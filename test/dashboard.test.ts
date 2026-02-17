@@ -9,6 +9,8 @@ import {
   getRecentActivity,
   getQualityDistribution,
   getRepoStats,
+  logEvent,
+  getRecentEvents,
 } from "../src/db.js";
 import { renderDashboard } from "../src/dashboard.js";
 import type { EmbeddingRecord } from "../src/types.js";
@@ -211,7 +213,7 @@ describe("renderDashboard", () => {
     expect(html).toContain("Items Analyzed");
     expect(html).toContain("Duplicates Found");
     expect(html).toContain("Avg Quality Score");
-    expect(html).toContain("Recent Activity");
+    expect(html).toContain("Event Log");
     expect(html).toContain("Quality Distribution");
     expect(html).toContain("Per-Repo Breakdown");
     expect(html).toContain("org/repo");
@@ -232,7 +234,7 @@ describe("renderDashboard", () => {
       0,
     );
 
-    expect(html).toContain("No activity yet.");
+    expect(html).toContain("No events yet.");
     expect(html).toContain("No quality data yet.");
     expect(html).toContain("No repos tracked yet.");
     expect(html).toContain("—"); // em-dash for avg quality
@@ -257,5 +259,77 @@ describe("renderDashboard", () => {
 
     expect(html).not.toContain("<script>");
     expect(html).toContain("&lt;script&gt;");
+  });
+});
+
+describe("logEvent", () => {
+  it("writes and reads back correctly", () => {
+    const db = makeDb();
+    logEvent(db, { repo: "org/repo", eventType: "pull_request.opened", number: 42, action: "analyzed", detail: JSON.stringify({ quality: 8.5 }) });
+    logEvent(db, { repo: "org/repo", eventType: "issues.opened", number: 7, action: "duplicate_found" });
+
+    const events = getRecentEvents(db, 10);
+    expect(events).toHaveLength(2);
+    // Most recent first
+    expect(events[0].action).toBe("duplicate_found");
+    expect(events[0].event_type).toBe("issues.opened");
+    expect(events[0].number).toBe(7);
+    expect(events[1].action).toBe("analyzed");
+    expect(events[1].event_type).toBe("pull_request.opened");
+    expect(events[1].number).toBe(42);
+    expect(events[1].detail).toBe(JSON.stringify({ quality: 8.5 }));
+  });
+
+  it("event log appears in dashboard HTML", () => {
+    const db = makeDb();
+    seedDb(db);
+    logEvent(db, { repo: "org/repo", eventType: "pull_request.opened", number: 1, action: "analyzed" });
+    logEvent(db, { repo: "org/repo", eventType: "issues.opened", number: 5, action: "error", detail: JSON.stringify({ message: "fail" }) });
+
+    const events = getRecentEvents(db);
+    const html = renderDashboard(
+      getStats(db),
+      getRecentActivity(db),
+      getQualityDistribution(db),
+      getRepoStats(db),
+      100,
+      events,
+    );
+
+    expect(html).toContain("Event Log");
+    expect(html).toContain("pull_request.opened");
+    expect(html).toContain("issues.opened");
+    expect(html).toContain("Events Today");
+  });
+
+  it("multiple event types render with correct labels", () => {
+    const db = makeDb();
+    logEvent(db, { repo: "org/repo", eventType: "pull_request.opened", number: 1, action: "analyzed" });
+    logEvent(db, { repo: "org/repo", eventType: "issues.opened", number: 2, action: "duplicate_found" });
+    logEvent(db, { repo: "org/repo", eventType: "issue_comment.created", number: 3, action: "command", detail: JSON.stringify({ command: "review" }) });
+    logEvent(db, { repo: "org/repo", eventType: "pull_request.opened", number: 4, action: "error", detail: JSON.stringify({ message: "boom" }) });
+    logEvent(db, { repo: "org/repo", eventType: "pull_request.opened", number: 5, action: "skipped" });
+
+    const events = getRecentEvents(db);
+    const html = renderDashboard(
+      getStats(db),
+      getRecentActivity(db),
+      getQualityDistribution(db),
+      getRepoStats(db),
+      0,
+      events,
+    );
+
+    expect(html).toContain("Analyzed");
+    expect(html).toContain("Duplicate");
+    expect(html).toContain("Command");
+    expect(html).toContain("Error");
+    expect(html).toContain("Skipped");
+    // Verify color coding via badge style
+    expect(html).toContain("#22c55e");  // green for analyzed
+    expect(html).toContain("#eab308");  // yellow for duplicate
+    expect(html).toContain("#3b82f6");  // blue for command
+    expect(html).toContain("#ef4444");  // red for error
+    expect(html).toContain("#6b7280");  // gray for skipped
   });
 });

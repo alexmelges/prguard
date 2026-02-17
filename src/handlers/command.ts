@@ -7,6 +7,7 @@ import {
   getDb,
   getEmbeddingRecord,
   listEmbeddings,
+  logEvent,
   upsertEmbedding,
   upsertAnalysis,
   upsertReview
@@ -148,6 +149,9 @@ export async function handleCommand(app: Probot, context: { octokit: any; payloa
   }
 
   const config = await loadRepoConfig({ octokit: context.octokit, owner, repo });
+  const db = getDb();
+
+  logEvent(db, { repo: fullRepo, eventType: "issue_comment.created", number, action: "command", detail: JSON.stringify({ command: command.kind, commenter }) });
 
   switch (command.kind) {
     case "help":

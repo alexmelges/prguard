@@ -110,6 +110,18 @@ export function migrate(db: Database.Database): void {
       count INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (installation_id, date)
     );
+
+    CREATE TABLE IF NOT EXISTS events (
+      id INTEGER PRIMARY KEY,
+      repo TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      number INTEGER,
+      action TEXT NOT NULL,
+      detail TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_events_repo ON events(repo, created_at);
   `);
 
   // Migration: add active column if missing
@@ -412,6 +424,56 @@ export function getRepoStats(db: Database.Database): RepoStatsRow[] {
     ) d ON e.repo = d.repo
     ORDER BY embeddings DESC
   `).all() as RepoStatsRow[];
+}
+
+// ── Event logging ──────────────────────────────────────────────────
+
+export interface EventInput {
+  repo: string;
+  eventType: string;
+  number?: number;
+  action: string;
+  detail?: string;
+}
+
+export interface EventRow {
+  id: number;
+  repo: string;
+  event_type: string;
+  number: number | null;
+  action: string;
+  detail: string | null;
+  created_at: string;
+}
+
+export function logEvent(db: Database.Database, event: EventInput): void {
+  db.prepare(
+    `INSERT INTO events (repo, event_type, number, action, detail)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(event.repo, event.eventType, event.number ?? null, event.action, event.detail ?? null);
+}
+
+export function getRecentEvents(db: Database.Database, limit = 50): EventRow[] {
+  return db.prepare(
+    `SELECT id, repo, event_type, number, action, detail, created_at
+     FROM events
+     ORDER BY created_at DESC, id DESC
+     LIMIT ?`
+  ).all(limit) as EventRow[];
+}
+
+export function getEventCountToday(db: Database.Database): number {
+  const row = db.prepare(
+    "SELECT COUNT(*) AS c FROM events WHERE created_at >= date('now')"
+  ).get() as { c: number };
+  return row.c;
+}
+
+export function getLastEventTimestamp(db: Database.Database): string | null {
+  const row = db.prepare(
+    "SELECT created_at FROM events ORDER BY created_at DESC, id DESC LIMIT 1"
+  ).get() as { created_at: string } | undefined;
+  return row?.created_at ?? null;
 }
 
 /** Check and increment rate limit counter atomically. Returns true if under budget. */

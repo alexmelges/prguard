@@ -1,4 +1,4 @@
-import type { DashboardStats, RecentActivityRow, QualityDistribution, RepoStatsRow } from "./db.js";
+import type { DashboardStats, RecentActivityRow, QualityDistribution, RepoStatsRow, EventRow } from "./db.js";
 
 const VERSION = process.env.npm_package_version ?? "0.1.0";
 
@@ -21,6 +21,34 @@ function badgeColor(rec: string | null): string {
   }
 }
 
+function actionColor(action: string): string {
+  switch (action) {
+    case "analyzed": return "#22c55e";
+    case "reviewed": return "#22c55e";
+    case "duplicate_found": return "#eab308";
+    case "command": return "#3b82f6";
+    case "error": return "#ef4444";
+    case "skipped": return "#6b7280";
+    case "rate_limited": return "#6b7280";
+    case "closed": return "#6b7280";
+    default: return "#6b7280";
+  }
+}
+
+function actionLabel(action: string): string {
+  switch (action) {
+    case "analyzed": return "Analyzed";
+    case "reviewed": return "Reviewed";
+    case "duplicate_found": return "Duplicate";
+    case "command": return "Command";
+    case "error": return "Error";
+    case "skipped": return "Skipped";
+    case "rate_limited": return "Rate Limited";
+    case "closed": return "Closed";
+    default: return action;
+  }
+}
+
 function qualityBarColor(score: number): string {
   if (score >= 8) return "#22c55e";
   if (score >= 6) return "#3b82f6";
@@ -34,6 +62,7 @@ export function renderDashboard(
   qualityDist: QualityDistribution,
   repoStats: RepoStatsRow[],
   uptimeSeconds: number,
+  events: EventRow[] = [],
 ): string {
   const uptimeStr = formatUptime(uptimeSeconds);
   const totalQuality = qualityDist.excellent + qualityDist.good + qualityDist.needs_work + qualityDist.poor;
@@ -236,31 +265,35 @@ export function renderDashboard(
         <div class="card-label">Avg Quality Score</div>
         <div class="card-value accent">${stats.avg_quality > 0 ? stats.avg_quality.toFixed(1) : "—"}</div>
       </div>
+      <div class="card">
+        <div class="card-label">Events Today</div>
+        <div class="card-value">${events.length}</div>
+      </div>
     </div>
 
     <div class="section">
-      <h2>Recent Activity</h2>
-      ${recentActivity.length === 0 ? '<p class="empty">No activity yet.</p>' : `
+      <h2>Event Log</h2>
+      ${events.length === 0 ? '<p class="empty">No events yet.</p>' : `
       <table>
         <thead>
           <tr>
             <th>Time</th>
             <th>Repo</th>
             <th>#</th>
-            <th>Type</th>
-            <th>Recommendation</th>
-            <th>Quality</th>
+            <th>Event</th>
+            <th>Action</th>
+            <th>Detail</th>
           </tr>
         </thead>
         <tbody>
-          ${recentActivity.map(row => `
+          ${events.map(row => `
           <tr>
             <td>${escapeHtml(formatTime(row.created_at))}</td>
             <td>${escapeHtml(row.repo)}</td>
-            <td>${row.number}</td>
-            <td><span class="type-badge">${escapeHtml(row.source)}</span></td>
-            <td>${row.recommendation ? `<span class="badge" style="background:${badgeColor(row.recommendation)}">${escapeHtml(row.recommendation)}</span>` : "—"}</td>
-            <td>${row.quality_score != null ? `<span class="quality-bar-container"><span class="quality-bar" style="width:${(row.quality_score / 10) * 100}%;background:${qualityBarColor(row.quality_score)}"></span></span><span class="quality-score">${row.quality_score.toFixed(1)}</span>` : "—"}</td>
+            <td>${row.number ?? "—"}</td>
+            <td><span class="type-badge">${escapeHtml(row.event_type)}</span></td>
+            <td><span class="badge" style="background:${actionColor(row.action)}">${escapeHtml(actionLabel(row.action))}</span></td>
+            <td>${row.detail ? escapeHtml(row.detail).slice(0, 80) : "—"}</td>
           </tr>`).join("")}
         </tbody>
       </table>`}

@@ -1,6 +1,6 @@
 import type { Probot, ApplicationFunctionOptions } from "probot";
 import type { Request, Response } from "express";
-import { deactivateEmbedding, reactivateEmbedding, getDb, getStats, getRecentActivity, getQualityDistribution, getRepoStats } from "./db.js";
+import { deactivateEmbedding, reactivateEmbedding, getDb, getStats, getRecentActivity, getQualityDistribution, getRepoStats, logEvent, getRecentEvents, getEventCountToday, getLastEventTimestamp } from "./db.js";
 import { renderDashboard } from "./dashboard.js";
 import { handleCommand } from "./handlers/command.js";
 import { handleIssue } from "./handlers/issue.js";
@@ -37,6 +37,7 @@ async function handleClosed(app: Probot, context: { payload: any }, type: ItemTy
 
   const fullRepo = `${owner}/${repo}`;
   deactivateEmbedding(db, fullRepo, type, number);
+  logEvent(db, { repo: fullRepo, eventType: `${type === "pr" ? "pull_request" : "issues"}.closed`, number, action: "closed" });
   app.log.info({ repo: fullRepo, number, action: `${type}.closed` }, `Deactivated embedding for ${type} #${number}`);
 }
 
@@ -137,9 +138,10 @@ export default (app: Probot, { getRouter }: ApplicationFunctionOptions): void =>
         const recent = getRecentActivity(db);
         const dist = getQualityDistribution(db);
         const repos = getRepoStats(db);
+        const events = getRecentEvents(db);
         const uptimeSeconds = Math.floor((Date.now() - startTime) / 1000);
         res.setHeader("Content-Type", "text/html; charset=utf-8");
-        res.status(200).send(renderDashboard(stats, recent, dist, repos, uptimeSeconds));
+        res.status(200).send(renderDashboard(stats, recent, dist, repos, uptimeSeconds, events));
       } catch {
         res.status(503).send("Dashboard unavailable");
       }
@@ -153,6 +155,8 @@ export default (app: Probot, { getRouter }: ApplicationFunctionOptions): void =>
           recent_activity: getRecentActivity(db),
           quality_distribution: getQualityDistribution(db),
           repo_stats: getRepoStats(db),
+          events_today: getEventCountToday(db),
+          last_event: getLastEventTimestamp(db),
         });
       } catch {
         res.status(503).json({ error: "Stats unavailable" });
@@ -168,6 +172,7 @@ export default (app: Probot, { getRouter }: ApplicationFunctionOptions): void =>
       const repo = `${context.payload.repository.owner.login}/${context.payload.repository.name}`;
       const number = context.payload.pull_request.number;
       app.log.error({ error, repo, number, action: "pr.analyze" }, "PRGuard failed processing PR");
+      try { logEvent(getDb(), { repo, eventType: "pull_request.opened", number, action: "error", detail: JSON.stringify({ message: String(error) }) }); } catch {}
     }
   });
 
@@ -179,6 +184,7 @@ export default (app: Probot, { getRouter }: ApplicationFunctionOptions): void =>
       const repo = `${context.payload.repository.owner.login}/${context.payload.repository.name}`;
       const number = context.payload.issue.number;
       app.log.error({ error, repo, number, action: "issue.analyze" }, "PRGuard failed processing issue");
+      try { logEvent(getDb(), { repo, eventType: "issues.opened", number, action: "error", detail: JSON.stringify({ message: String(error) }) }); } catch {}
     }
   });
 
@@ -265,6 +271,7 @@ export default (app: Probot, { getRouter }: ApplicationFunctionOptions): void =>
       const repo = `${context.payload.repository.owner.login}/${context.payload.repository.name}`;
       const number = context.payload.issue.number;
       app.log.error({ error, repo, number, action: "command.error" }, "PRGuard failed processing command");
+      try { logEvent(getDb(), { repo, eventType: "issue_comment.created", number, action: "error", detail: JSON.stringify({ message: String(error) }) }); } catch {}
     }
   });
 };
