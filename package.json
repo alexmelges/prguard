@@ -1,0 +1,39 @@
+{
+  "name": "prguard",
+  "version": "0.1.0",
+  "description": "GitHub App for PR/Issue triage, de-duplication, and vision enforcement",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "probot run ./dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "github-app",
+    "probot",
+    "pull-requests",
+    "triage",
+    "openai"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "js-yaml": "^4.1.0",
+    "openai": "^4.83.0",
+    "probot": "^13.4.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.13.5",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}

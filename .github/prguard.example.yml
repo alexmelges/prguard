@@ -1,0 +1,18 @@
+vision: |
+  OpenClaw is a personal AI assistant platform.
+  We accept: bug fixes, performance improvements, new skills, documentation.
+  We reject: unrelated features, breaking API changes without discussion,
+  AI-generated PRs that do not follow CONTRIBUTING.md.
+
+duplicate_threshold: 0.85
+vision_model: gpt-4o-mini
+labels:
+  duplicate: "prguard:duplicate"
+  off_scope: "prguard:off-scope"
+  on_track: "prguard:on-track"
+  needs_review: "prguard:needs-review"
+  recommended: "prguard:recommended"
+
+trusted_users:
+  - steipete
+  - dependabot[bot]
