@@ -298,6 +298,122 @@ export function getReview(db: Database.Database, repo: string, type: ItemType, n
   };
 }
 
+// ── Dashboard query types ──────────────────────────────────────────
+
+export interface DashboardStats {
+  repos: number;
+  embeddings: { total: number; active: number };
+  analyses: number;
+  reviews: number;
+  duplicates_found: number;
+  avg_quality: number;
+}
+
+export interface RecentActivityRow {
+  repo: string;
+  type: string;
+  number: number;
+  recommendation: string | null;
+  quality_score: number | null;
+  created_at: string;
+  source: "analysis" | "review";
+}
+
+export interface QualityDistribution {
+  excellent: number;
+  good: number;
+  needs_work: number;
+  poor: number;
+}
+
+export interface RepoStatsRow {
+  repo: string;
+  embeddings: number;
+  analyses: number;
+  reviews: number;
+  duplicates: number;
+}
+
+// ── Dashboard queries ──────────────────────────────────────────────
+
+export function getStats(db: Database.Database): DashboardStats {
+  const repos = (db.prepare("SELECT COUNT(DISTINCT repo) AS c FROM embeddings").get() as { c: number }).c;
+  const totalEmbed = (db.prepare("SELECT COUNT(*) AS c FROM embeddings").get() as { c: number }).c;
+  const activeEmbed = (db.prepare("SELECT COUNT(*) AS c FROM embeddings WHERE active = 1").get() as { c: number }).c;
+  const analyses = (db.prepare("SELECT COUNT(*) AS c FROM analyses").get() as { c: number }).c;
+  const reviews = (db.prepare("SELECT COUNT(*) AS c FROM reviews").get() as { c: number }).c;
+  const dupsRow = db.prepare(
+    "SELECT COUNT(*) AS c FROM analyses WHERE duplicates IS NOT NULL AND duplicates != '[]'"
+  ).get() as { c: number };
+  const avgRow = db.prepare(
+    "SELECT AVG(pr_quality_score) AS avg FROM analyses WHERE pr_quality_score IS NOT NULL"
+  ).get() as { avg: number | null };
+
+  return {
+    repos,
+    embeddings: { total: totalEmbed, active: activeEmbed },
+    analyses,
+    reviews,
+    duplicates_found: dupsRow.c,
+    avg_quality: avgRow.avg ?? 0,
+  };
+}
+
+export function getRecentActivity(db: Database.Database, limit = 20): RecentActivityRow[] {
+  const rows = db.prepare(`
+    SELECT repo, type, number, recommendation, pr_quality_score AS quality_score, created_at, 'analysis' AS source
+    FROM analyses
+    UNION ALL
+    SELECT repo, type, number, verdict AS recommendation, quality_score, created_at, 'review' AS source
+    FROM reviews
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).all(limit) as RecentActivityRow[];
+  return rows;
+}
+
+export function getQualityDistribution(db: Database.Database): QualityDistribution {
+  const rows = db.prepare(`
+    SELECT
+      SUM(CASE WHEN score >= 8 THEN 1 ELSE 0 END) AS excellent,
+      SUM(CASE WHEN score >= 6 AND score < 8 THEN 1 ELSE 0 END) AS good,
+      SUM(CASE WHEN score >= 4 AND score < 6 THEN 1 ELSE 0 END) AS needs_work,
+      SUM(CASE WHEN score < 4 THEN 1 ELSE 0 END) AS poor
+    FROM (
+      SELECT pr_quality_score AS score FROM analyses WHERE pr_quality_score IS NOT NULL
+      UNION ALL
+      SELECT quality_score AS score FROM reviews
+    )
+  `).get() as { excellent: number | null; good: number | null; needs_work: number | null; poor: number | null };
+
+  return {
+    excellent: rows.excellent ?? 0,
+    good: rows.good ?? 0,
+    needs_work: rows.needs_work ?? 0,
+    poor: rows.poor ?? 0,
+  };
+}
+
+export function getRepoStats(db: Database.Database): RepoStatsRow[] {
+  return db.prepare(`
+    SELECT
+      e.repo,
+      COALESCE(e.cnt, 0) AS embeddings,
+      COALESCE(a.cnt, 0) AS analyses,
+      COALESCE(r.cnt, 0) AS reviews,
+      COALESCE(d.cnt, 0) AS duplicates
+    FROM (SELECT repo, COUNT(*) AS cnt FROM embeddings GROUP BY repo) e
+    LEFT JOIN (SELECT repo, COUNT(*) AS cnt FROM analyses GROUP BY repo) a ON e.repo = a.repo
+    LEFT JOIN (SELECT repo, COUNT(*) AS cnt FROM reviews GROUP BY repo) r ON e.repo = r.repo
+    LEFT JOIN (
+      SELECT repo, COUNT(*) AS cnt FROM analyses
+      WHERE duplicates IS NOT NULL AND duplicates != '[]'
+      GROUP BY repo
+    ) d ON e.repo = d.repo
+    ORDER BY embeddings DESC
+  `).all() as RepoStatsRow[];
+}
+
 /** Check and increment rate limit counter atomically. Returns true if under budget. */
 export function checkRateLimit(db: Database.Database, repo: string, maxPerHour: number): boolean {
   const hour = new Date().toISOString().slice(0, 13); // YYYY-MM-DDTHH

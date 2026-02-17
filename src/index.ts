@@ -1,11 +1,14 @@
 import type { Probot, ApplicationFunctionOptions } from "probot";
 import type { Request, Response } from "express";
-import { deactivateEmbedding, reactivateEmbedding, getDb } from "./db.js";
+import { deactivateEmbedding, reactivateEmbedding, getDb, getStats, getRecentActivity, getQualityDistribution, getRepoStats } from "./db.js";
+import { renderDashboard } from "./dashboard.js";
 import { handleCommand } from "./handlers/command.js";
 import { handleIssue } from "./handlers/issue.js";
 import { handlePR } from "./handlers/pr.js";
 import { inc, toPrometheus } from "./metrics.js";
 import type { ItemType } from "./types.js";
+
+const startTime = Date.now();
 
 /** Handle PR/issue closed events — deactivate embeddings. */
 async function handleClosed(app: Probot, context: { payload: any }, type: ItemType): Promise<void> {
@@ -125,6 +128,35 @@ export default (app: Probot, { getRouter }: ApplicationFunctionOptions): void =>
     router.get("/metrics", (_req: Request, res: Response) => {
       res.setHeader("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
       res.status(200).send(toPrometheus());
+    });
+
+    router.get("/dashboard", (_req: Request, res: Response) => {
+      try {
+        const db = getDb();
+        const stats = getStats(db);
+        const recent = getRecentActivity(db);
+        const dist = getQualityDistribution(db);
+        const repos = getRepoStats(db);
+        const uptimeSeconds = Math.floor((Date.now() - startTime) / 1000);
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.status(200).send(renderDashboard(stats, recent, dist, repos, uptimeSeconds));
+      } catch {
+        res.status(503).send("Dashboard unavailable");
+      }
+    });
+
+    router.get("/api/stats", (_req: Request, res: Response) => {
+      try {
+        const db = getDb();
+        res.status(200).json({
+          stats: getStats(db),
+          recent_activity: getRecentActivity(db),
+          quality_distribution: getQualityDistribution(db),
+          repo_stats: getRepoStats(db),
+        });
+      } catch {
+        res.status(503).json({ error: "Stats unavailable" });
+      }
     });
   }
 
