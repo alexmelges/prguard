@@ -32,7 +32,10 @@ function scoreContributorHistory(mergedPRs: number, accountAgeDays: number): num
   return 0.7 * history + 0.3 * age;
 }
 
-export function scorePRQuality(input: PRQualityInput): PRQualityResult {
+export function scorePRQuality(
+  input: PRQualityInput,
+  thresholds: { approve: number; reject: number } = { approve: 0.75, reject: 0.45 }
+): PRQualityResult {
   const diffQuality = scoreDiffQuality(input.additions, input.deletions, input.changedFiles);
   const testScore = input.hasTests ? 1 : 0.3;
   const commitScore = scoreCommitHygiene(input.commitMessages);
@@ -60,7 +63,7 @@ export function scorePRQuality(input: PRQualityInput): PRQualityResult {
     reasons.push("Diff is broad and may need scoping");
   }
 
-  const recommendation = score >= 0.75 ? "approve" : score >= 0.45 ? "review" : "reject";
+  const recommendation = score >= thresholds.approve ? "approve" : score >= thresholds.reject ? "review" : "reject";
 
   return {
     score,

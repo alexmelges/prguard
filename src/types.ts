@@ -8,6 +8,7 @@ export interface EmbeddingRecord {
   body: string;
   diffSummary: string;
   embedding: number[];
+  active?: boolean;
 }
 
 export interface DuplicateMatch {
@@ -55,6 +56,13 @@ export interface PRGuardConfig {
   vision_model: string;
   labels: LabelConfig;
   trusted_users: string[];
+  quality_thresholds: {
+    approve: number;
+    reject: number;
+  };
+  max_diff_lines: number;
+  dry_run: boolean;
+  skip_bots: boolean;
 }
 
 export interface AnalysisRecord {

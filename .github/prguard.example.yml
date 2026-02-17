@@ -13,6 +13,14 @@ labels:
   needs_review: "prguard:needs-review"
   recommended: "prguard:recommended"
 
+quality_thresholds:
+  approve: 0.75
+  reject: 0.45
+
+max_diff_lines: 10000
+skip_bots: true
+dry_run: false
+
 trusted_users:
   - steipete
   - dependabot[bot]

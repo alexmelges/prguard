@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { VisionEvaluation } from "./types.js";
+import { withRetry } from "./embed.js";
 
 export function buildVisionPrompt(params: {
   vision: string;
@@ -9,7 +10,7 @@ export function buildVisionPrompt(params: {
 }): string {
   return [
     "You are evaluating whether a pull request aligns with project vision and rules.",
-    "Respond in strict JSON: {\"score\": number, \"aligned\": boolean, \"reasoning\": string, \"recommendation\": \"approve\"|\"review\"|\"reject\" }",
+    'Respond in strict JSON: {"score": number, "aligned": boolean, "reasoning": string, "recommendation": "approve"|"review"|"reject" }',
     "Project vision:",
     params.vision,
     "PR title:",
@@ -27,12 +28,7 @@ export function normalizeVisionEvaluation(raw: Partial<VisionEvaluation>): Visio
   const reasoning = (raw.reasoning ?? "No reasoning provided").trim();
   const recommendation = raw.recommendation ?? (score >= 0.75 ? "approve" : score >= 0.45 ? "review" : "reject");
 
-  return {
-    score,
-    aligned,
-    reasoning,
-    recommendation
-  };
+  return { score, aligned, reasoning, recommendation };
 }
 
 export async function evaluateVision(params: {
@@ -42,20 +38,30 @@ export async function evaluateVision(params: {
   title: string;
   body: string;
   diffSummary: string;
+  logger?: { warn: (msg: string) => void };
 }): Promise<VisionEvaluation> {
   const prompt = buildVisionPrompt(params);
-  const completion = await params.client.chat.completions.create({
-    model: params.model,
-    temperature: 0,
-    messages: [
-      {
-        role: "user",
-        content: prompt
-      }
-    ]
-  });
+  const result = await withRetry(
+    () =>
+      params.client.chat.completions.create({
+        model: params.model,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [{ role: "user", content: prompt }]
+      }),
+    { logger: params.logger }
+  );
 
-  const text = completion.choices[0]?.message?.content ?? "";
+  if (!result) {
+    return {
+      score: 0.5,
+      aligned: true,
+      reasoning: "Vision analysis unavailable (API error)",
+      recommendation: "review"
+    };
+  }
+
+  const text = result.choices[0]?.message?.content ?? "";
 
   try {
     const parsed = JSON.parse(text) as Partial<VisionEvaluation>;

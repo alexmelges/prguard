@@ -9,6 +9,7 @@ interface EmbeddingRow {
   body: string;
   diff_summary: string;
   embedding: string;
+  active: number;
 }
 
 interface AnalysisRow {
@@ -22,8 +23,28 @@ interface AnalysisRow {
   pr_quality_score: number | null;
 }
 
+let _db: Database.Database | null = null;
+
+/** Lazy singleton database. Call getDb() instead of using a global. */
+export function getDb(path?: string): Database.Database {
+  if (!_db) {
+    _db = createDb(path);
+  }
+  return _db;
+}
+
+/** Reset the singleton (for testing). */
+export function resetDb(): void {
+  if (_db) {
+    _db.close();
+    _db = null;
+  }
+}
+
 export function createDb(path = process.env.DATABASE_PATH ?? "./prguard.db"): Database.Database {
   const db = new Database(path);
+  db.pragma("journal_mode = WAL");
+  db.pragma("busy_timeout = 5000");
   migrate(db);
   return db;
 }
@@ -39,9 +60,12 @@ export function migrate(db: Database.Database): void {
       body TEXT,
       diff_summary TEXT,
       embedding TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT DEFAULT (datetime('now')),
       UNIQUE(repo, type, number)
     );
+
+    CREATE INDEX IF NOT EXISTS idx_embeddings_repo_active ON embeddings(repo, active);
 
     CREATE TABLE IF NOT EXISTS analyses (
       id INTEGER PRIMARY KEY,
@@ -56,20 +80,37 @@ export function migrate(db: Database.Database): void {
       created_at TEXT DEFAULT (datetime('now')),
       UNIQUE(repo, type, number)
     );
+
+    CREATE TABLE IF NOT EXISTS rate_limits (
+      id INTEGER PRIMARY KEY,
+      repo TEXT NOT NULL,
+      hour TEXT NOT NULL,
+      openai_calls INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(repo, hour)
+    );
   `);
+
+  // Migration: add active column if missing
+  try {
+    db.prepare("SELECT active FROM embeddings LIMIT 1").get();
+  } catch {
+    db.exec("ALTER TABLE embeddings ADD COLUMN active INTEGER NOT NULL DEFAULT 1");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_embeddings_repo_active ON embeddings(repo, active)");
+  }
 }
 
 export function upsertEmbedding(db: Database.Database, record: EmbeddingRecord): void {
   db.prepare(
     `
-      INSERT INTO embeddings (repo, type, number, title, body, diff_summary, embedding)
-      VALUES (@repo, @type, @number, @title, @body, @diffSummary, @embedding)
+      INSERT INTO embeddings (repo, type, number, title, body, diff_summary, embedding, active)
+      VALUES (@repo, @type, @number, @title, @body, @diffSummary, @embedding, 1)
       ON CONFLICT(repo, type, number)
       DO UPDATE SET
         title = excluded.title,
         body = excluded.body,
         diff_summary = excluded.diff_summary,
         embedding = excluded.embedding,
+        active = 1,
         created_at = datetime('now')
     `
   ).run({
@@ -78,10 +119,17 @@ export function upsertEmbedding(db: Database.Database, record: EmbeddingRecord):
   });
 }
 
-export function listEmbeddings(db: Database.Database, repo: string): EmbeddingRecord[] {
+/** List active embeddings for a repo, limited to the most recent N (default 500). */
+export function listEmbeddings(db: Database.Database, repo: string, limit = 500): EmbeddingRecord[] {
   const rows = db
-    .prepare("SELECT repo, type, number, title, body, diff_summary, embedding FROM embeddings WHERE repo = ?")
-    .all(repo) as EmbeddingRow[];
+    .prepare(
+      `SELECT repo, type, number, title, body, diff_summary, embedding, active
+       FROM embeddings
+       WHERE repo = ? AND active = 1
+       ORDER BY created_at DESC
+       LIMIT ?`
+    )
+    .all(repo, limit) as EmbeddingRow[];
 
   return rows.map((row) => ({
     repo: row.repo,
@@ -90,31 +138,29 @@ export function listEmbeddings(db: Database.Database, repo: string): EmbeddingRe
     title: row.title,
     body: row.body,
     diffSummary: row.diff_summary,
-    embedding: JSON.parse(row.embedding) as number[]
+    embedding: JSON.parse(row.embedding) as number[],
+    active: row.active === 1
   }));
+}
+
+/** Mark an embedding as inactive (soft delete on close/merge). */
+export function deactivateEmbedding(db: Database.Database, repo: string, type: ItemType, number: number): void {
+  db.prepare(
+    "UPDATE embeddings SET active = 0 WHERE repo = ? AND type = ? AND number = ?"
+  ).run(repo, type, number);
 }
 
 export function upsertAnalysis(db: Database.Database, record: AnalysisRecord): void {
   db.prepare(
     `
       INSERT INTO analyses (
-        repo,
-        type,
-        number,
-        duplicates,
-        vision_score,
-        vision_reasoning,
-        recommendation,
-        pr_quality_score
+        repo, type, number, duplicates,
+        vision_score, vision_reasoning,
+        recommendation, pr_quality_score
       ) VALUES (
-        @repo,
-        @type,
-        @number,
-        @duplicates,
-        @visionScore,
-        @visionReasoning,
-        @recommendation,
-        @prQualityScore
+        @repo, @type, @number, @duplicates,
+        @visionScore, @visionReasoning,
+        @recommendation, @prQualityScore
       )
       ON CONFLICT(repo, type, number)
       DO UPDATE SET
@@ -157,4 +203,25 @@ export function getAnalysis(
     recommendation: row.recommendation,
     prQualityScore: row.pr_quality_score
   };
+}
+
+/** Check and increment rate limit counter. Returns true if under budget. */
+export function checkRateLimit(db: Database.Database, repo: string, maxPerHour: number): boolean {
+  const hour = new Date().toISOString().slice(0, 13); // YYYY-MM-DDTHH
+  const row = db.prepare(
+    "SELECT openai_calls FROM rate_limits WHERE repo = ? AND hour = ?"
+  ).get(repo, hour) as { openai_calls: number } | undefined;
+
+  if (row && row.openai_calls >= maxPerHour) {
+    return false;
+  }
+
+  db.prepare(
+    `INSERT INTO rate_limits (repo, hour, openai_calls)
+     VALUES (?, ?, 1)
+     ON CONFLICT(repo, hour)
+     DO UPDATE SET openai_calls = openai_calls + 1`
+  ).run(repo, hour);
+
+  return true;
 }

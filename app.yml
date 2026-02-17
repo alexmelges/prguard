@@ -1,0 +1,24 @@
+# GitHub App Manifest
+# Use this to register the PRGuard GitHub App at:
+# https://github.com/settings/apps/new
+
+name: PRGuard
+description: Automated PR/Issue triage — duplicate detection, quality scoring, vision alignment
+url: https://github.com/apps/prguard
+public: true
+
+default_events:
+  - pull_request
+  - issues
+  - check_run
+
+default_permissions:
+  issues: write
+  pull_requests: read
+  checks: read
+  contents: read
+  metadata: read
+
+hook_attributes:
+  url: https://your-domain.com/api/github/webhooks
+  active: true

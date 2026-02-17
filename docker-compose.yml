@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  prguard:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - prguard-data:/data
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - DATABASE_PATH=/data/prguard.db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/ping').then(r => process.exit(r.ok ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  prguard-data:

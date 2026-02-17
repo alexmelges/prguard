@@ -1,0 +1,8 @@
+node_modules
+dist
+*.db
+.env
+.git
+test
+PLAN.md
+CLAUDE.md

@@ -1,69 +1,57 @@
-# CLAUDE.md — PRGuard Agent Instructions
+# CLAUDE.md — PRGuard Project Rules
 
-## Project Overview
-PRGuard is a GitHub App that helps OSS maintainers triage PRs and Issues at scale.
-It de-duplicates submissions, enforces project vision, and recommends the best PR among duplicates.
+## Architecture
 
-## Tech Stack
-- TypeScript (ESM, strict mode)
-- Probot framework for GitHub App
-- SQLite via better-sqlite3 for storage
-- OpenAI API for embeddings (text-embedding-3-small) and LLM (gpt-4o-mini)
-- Vitest for testing
-- Node.js 20+
-
-## Code Style
-- ESM only (`"type": "module"` in package.json)
-- Strict TypeScript (`strict: true`)
-- No classes unless truly needed — prefer functions and plain objects
-- No premature abstractions — three similar lines are better than a premature abstraction
-- Small, focused files — each module does one thing
-- All async functions return `Promise<T>` explicitly typed
-- Error handling: fail loud in dev, graceful in production (log + continue)
-
-## Architecture Rules
-- **Comment, don't block.** Never auto-close or auto-reject PRs. Only comment and label.
-- **Idempotent operations.** Re-analyzing a PR should produce the same result and update in place.
-- **Config from repo.** All behavior configured via `.github/prguard.yml` in the target repo.
-- **No external infra for MVP.** SQLite only. No Redis, no Postgres, no Supabase.
-- **Embeddings are cheap.** Don't over-optimize. Re-embed on edit is fine.
+- **Runtime:** Node 20+, TypeScript ESM (`"type": "module"`), strict mode
+- **Framework:** Probot 13 (GitHub App framework)
+- **DB:** SQLite via `better-sqlite3` — requires persistent disk (not serverless)
+- **AI:** OpenAI SDK — embeddings (`text-embedding-3-small`) + chat (`gpt-4o-mini`)
+- **Tests:** Vitest
 
 ## File Layout
-- `src/index.ts` — Probot entry point, webhook handlers
-- `src/embed.ts` — OpenAI embedding generation
-- `src/dedup.ts` — Cosine similarity, duplicate detection, clustering
-- `src/vision.ts` — Vision doc enforcement via LLM
-- `src/quality.ts` — PR quality scoring (diff size, tests, commit hygiene)
-- `src/comment.ts` — GitHub comment formatting (markdown)
-- `src/labels.ts` — Label creation and application
-- `src/db.ts` — SQLite database setup, migrations, queries
-- `src/config.ts` — Load and parse .github/prguard.yml
 
-## Testing
-- Unit tests for each module (dedup, vision, quality)
-- Mock OpenAI API calls in tests (don't hit real API)
-- Mock GitHub API via Probot's test helpers
-- `vitest` with `--coverage` for CI
-
-## Common Patterns
-```typescript
-// Embedding generation
-const embedding = await getEmbedding(text); // returns number[]
-
-// Cosine similarity
-const similarity = cosineSimilarity(embA, embB); // returns 0-1
-
-// DB operations
-db.upsertEmbedding({ repo, type, number, title, body, diffSummary, embedding });
-const duplicates = db.findDuplicates(repo, type, number, embedding, threshold);
+```
+src/index.ts     — Probot event handlers, orchestration (the "controller")
+src/db.ts        — SQLite schema, queries, rate limiting
+src/embed.ts     — OpenAI embedding + retry logic
+src/vision.ts    — LLM-based vision alignment evaluation
+src/quality.ts   — PR quality scoring (pure function)
+src/dedup.ts     — Cosine similarity + duplicate detection (pure functions)
+src/comment.ts   — Markdown summary rendering (pure function)
+src/labels.ts    — GitHub label ensure/apply
+src/config.ts    — `.github/prguard.yml` loading + defaults
+src/types.ts     — All shared TypeScript interfaces
 ```
 
-## Anti-Patterns
-- Don't fetch full diffs for embedding — use first 2000 chars max
-- Don't call OpenAI for every label check — batch where possible
-- Don't create labels that already exist (check first)
-- Don't comment if nothing actionable found (no "all clear!" spam)
-- Don't over-engineer the MVP — ship something that works for one repo first
+## Conventions
 
-## Lessons Learned
-(Add lessons here as we build)
+- All source in `src/`, tests in `test/`
+- File imports use `.js` extension (ESM requirement)
+- Pure functions where possible — side effects only in `index.ts`, `db.ts`, `labels.ts`
+- `getDb()` returns lazy singleton; never use global `const db = createDb()`
+- OpenAI calls always go through `withRetry()` for exponential backoff
+- All OpenAI JSON responses use `response_format: { type: "json_object" }`
+- Config has sensible defaults; everything works with zero config
+
+## Commands
+
+```bash
+npx tsc --noEmit    # Type check
+npx vitest run      # Run tests
+npm run build       # Compile to dist/
+npm run dev         # Run with Probot
+```
+
+## Rules
+
+1. **Every OpenAI call must have retry + graceful degradation** — return fallback, never crash
+2. **Rate limit per repo/hour** — checked before any OpenAI call
+3. **Embeddings are soft-deleted** on PR/issue close (active=0), not hard-deleted
+4. **listEmbeddings is paginated** — default limit 500, SQL-side filtering by active + repo
+5. **No global mutable state** — db is lazy singleton via `getDb()`
+6. **dry_run mode** — logs actions without posting comments or applying labels
+7. **Bot PRs skipped by default** — configurable via `skip_bots`
+8. **Massive diffs handled** — configurable `max_diff_lines`, logged warning
+9. **Quality thresholds configurable** — `quality_thresholds.approve` / `.reject`
+10. **pickBestPR compares actual scores** from DB, not just current PR
+11. **Always run `tsc --noEmit` + `vitest run` after changes**

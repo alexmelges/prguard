@@ -12,7 +12,14 @@ export const defaultConfig: PRGuardConfig = {
     needs_review: "prguard:needs-review",
     recommended: "prguard:recommended"
   },
-  trusted_users: []
+  trusted_users: [],
+  quality_thresholds: {
+    approve: 0.75,
+    reject: 0.45
+  },
+  max_diff_lines: 10000,
+  dry_run: false,
+  skip_bots: true
 };
 
 export function parseConfig(yamlText: string): PRGuardConfig {
@@ -26,7 +33,14 @@ export function parseConfig(yamlText: string): PRGuardConfig {
       ...defaultConfig.labels,
       ...(parsed.labels ?? {})
     },
-    trusted_users: parsed.trusted_users ?? defaultConfig.trusted_users
+    trusted_users: parsed.trusted_users ?? defaultConfig.trusted_users,
+    quality_thresholds: {
+      ...defaultConfig.quality_thresholds,
+      ...(parsed.quality_thresholds ?? {})
+    },
+    max_diff_lines: parsed.max_diff_lines ?? defaultConfig.max_diff_lines,
+    dry_run: parsed.dry_run ?? defaultConfig.dry_run,
+    skip_bots: parsed.skip_bots ?? defaultConfig.skip_bots
   };
 }
 
