@@ -165,6 +165,14 @@ export function deactivateEmbedding(db: Database.Database, repo: string, type: I
   ).run(repo, type, number);
 }
 
+/** Reactivate a previously deactivated embedding (e.g. on PR reopen). */
+export function reactivateEmbedding(db: Database.Database, repo: string, type: ItemType, number: number): boolean {
+  const result = db.prepare(
+    "UPDATE embeddings SET active = 1 WHERE repo = ? AND type = ? AND number = ? AND active = 0"
+  ).run(repo, type, number);
+  return result.changes > 0;
+}
+
 export function upsertAnalysis(db: Database.Database, record: AnalysisRecord): void {
   db.prepare(
     `

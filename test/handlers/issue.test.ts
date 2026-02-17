@@ -54,6 +54,7 @@ function createIssuePayload(overrides: Record<string, any> = {}) {
 describe("handleIssue", () => {
   beforeEach(() => {
     process.env.OPENAI_API_KEY = "test-key";
+    process.env.DATABASE_PATH = ":memory:";
     resetDb();
     resetMetrics();
   });

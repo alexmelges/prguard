@@ -266,6 +266,12 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
     ciPassing
   }, config.quality_thresholds);
 
+  // Build full diff for vision and code review (larger than embedding summary)
+  const fullDiffChunks = files.data.map((file: { filename: string; patch?: string }) =>
+    `--- ${file.filename}\n${file.patch ?? ""}`
+  );
+  const fullDiff = fullDiffChunks.join("\n").slice(0, config.max_diff_tokens * 4); // ~4 chars per token
+
   let vision: VisionEvaluation;
   if (config.vision) {
     vision = await evaluateVision({
@@ -274,7 +280,7 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
       vision: config.vision,
       title: payload.pull_request.title,
       body,
-      diffSummary,
+      diffSummary: fullDiff,
       logger: log
     });
     inc("openai_calls_total");
@@ -285,12 +291,6 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
   // Deep code review (LLM-powered)
   let codeReview: CodeReview | null = null;
   if (config.deep_review) {
-    // Build full diff for review (larger than the summary used for embeddings)
-    const fullDiffChunks = files.data.map((file: { filename: string; patch?: string }) =>
-      `--- ${file.filename}\n${file.patch ?? ""}`
-    );
-    const fullDiff = fullDiffChunks.join("\n").slice(0, config.max_diff_tokens * 4); // ~4 chars per token
-
     codeReview = await reviewPR({
       client: openaiClient,
       model: config.review_model,

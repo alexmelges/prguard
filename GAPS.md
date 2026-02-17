@@ -10,53 +10,27 @@
 
 | steipete wants | PRGuard has | Score | Gap |
 |---|---|---|---|
-| Scan every PR and Issue | ✅ Probot webhooks on open/edit | 9/10 | Missing: reopen events |
+| Scan every PR and Issue | ✅ Probot webhooks on open/edit/reopen | 10/10 | — |
 | De-dupe | ✅ Embeddings + cosine similarity | 8/10 | Need to test at 3000+ PR scale |
-| Detect best PR (deep review) | ✅ LLM code review + weighted scoring | 8/10 | GPT-4o-mini reviews diffs, cross-PR comparison, cached in DB |
-| Vision document | ✅ .github/prguard.yml + GPT-4o-mini | 8/10 | Works but vision eval is shallow (title+body+diff summary, not full diff) |
+| Detect best PR (deep review) | ✅ LLM code review + weighted scoring | 9/10 | GPT-4o-mini reviews full diffs, cross-PR comparison, cached in DB |
+| Vision document | ✅ .github/prguard.yml + GPT-4o-mini | 9/10 | Vision now sees full diff (up to max_diff_tokens * 4 chars) |
 | "Even assisting would help" | ✅ Comments + labels, no auto-close | 9/10 | Good — advisory not authoritative |
 
-## Critical Gaps to Close
+## Remaining Gaps
 
-### 1. Deep Code Review (score 5/10 → target 8/10)
-steipete explicitly says "deep review is needed." Our quality scorer checks:
-- Diff size, file count (structural)
-- Test presence (binary)
-- Commit message hygiene (pattern matching)
-- Contributor history (API lookup)
-- CI status (binary)
-
-What's MISSING:
-- **LLM analysis of the actual code changes** — "does this PR do what it claims?"
-- **Code quality signals** — does it follow project conventions? Is it well-structured?
-- **Comparison across duplicate PRs** — "PR #42 is cleaner than PR #38 because..."
-
-FIX: Add an LLM-powered code review step that reads the diff and produces a substantive assessment. Use this in `pickBestPR` to compare implementations.
-
-### 2. Scale (untested at 3000+ PRs)
+### 1. Scale (untested at 3000+ PRs)
 - Backfill CLI exists but not tested at scale
 - `listEmbeddings` limited to 500 — what about repo with 3000 issues?
 - Embedding storage: 1536 floats × 3000 items = ~18MB in SQLite — should be fine
-- BUT cosine similarity loop over 500 items per PR = manageable
+- Cosine similarity loop over 500 items per PR = manageable
+- Consider SQL-side nearest-neighbor for very large repos
 
-FIX: Test backfill on a large OSS repo. Consider increasing limit or doing SQL-side nearest-neighbor.
+### 2. Cross-PR Comparison Depth
+When duplicates exist, comparison uses stored reviews. If a duplicate PR was analyzed before code review existed, the comparison will be shallow. Re-running backfill would fix this.
 
-### 3. Full Diff Access for Vision
-Currently vision eval only sees title + body + truncated diff summary (2000 chars).
-For a real vision check, it should see more of the actual changes.
+## Closed Gaps
 
-FIX: Increase diff context for vision eval, or summarize the full diff first then evaluate.
-
-### 4. PR Reopened Events
-Missing handler for `pull_request.reopened` — should reactivate deactivated embeddings.
-
-### 5. Cross-PR Comparison Comment
-When duplicates exist, the comment should explicitly compare them:
-"PR #42 vs PR #38: #42 has tests, smaller diff, and passing CI. Recommend #42."
-
-## Priority Order
-1. Deep code review (LLM) — this is steipete's #1 ask after dedup
-2. Cross-PR comparison in comments
-3. Scale testing
-4. Reopen handler
-5. Better diff access for vision
+- ~~Deep Code Review~~ ✅ LLM-powered review in `src/review.ts`
+- ~~Full Diff Access for Vision~~ ✅ Vision now gets same expanded diff as code review
+- ~~PR Reopened Events~~ ✅ `pull_request.reopened` handler + `reactivateEmbedding()`
+- ~~Cross-PR Comparison Comment~~ ✅ `buildCrossComparison()` in comments

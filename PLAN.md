@@ -65,19 +65,33 @@ All 10 core issues resolved. All enhancement items done except:
 | Config: `deep_review`, `review_model`, `max_diff_tokens` | ✅ |
 | Tests (10 new review tests, 3 DB review tests, 1 comment snapshot) | ✅ |
 
+## Iteration 5: Final Polish
+
+| Item | Status |
+|------|--------|
+| PR reopened handler + `reactivateEmbedding()` | ✅ |
+| Vision gets full diff (not 2000 char truncation) | ✅ |
+| CONTRIBUTING.md | ✅ |
+| `npm run dev` with smee.io proxy | ✅ |
+| `npm run lint` script | ✅ |
+| Fix flaky handler tests (DATABASE_PATH=:memory:) | ✅ |
+| GAPS.md updated | ✅ |
+
 ## Review Scores
 
-Reviewed 2026-02-17 (iteration 4). 89 tests passing, TypeScript clean.
+Reviewed 2026-02-17 (iteration 5). **91 tests passing**, TypeScript clean.
 
 | Dimension | Score | Notes |
 |-----------|-------|-------|
 | **Code quality** | 8/10 | Clean split into handlers, good separation of concerns. Types are solid. Structured logging throughout. Minor: some `any` types on octokit params. |
-| **Test coverage** | 8/10 | 75 tests: unit, integration, handler-level with mocked Probot context, error paths (OpenAI 500/auth, GitHub 404, rate limits), comment snapshot tests (7 scenarios). |
-| **Documentation** | 8/10 | Comprehensive README with deploy guide, observability docs, env vars, config reference. .env.example, app.yml. |
+| **Test coverage** | 9/10 | 91 tests: unit, integration, handler-level with mocked Probot context, error paths, comment snapshot tests, DB reactivation tests. All green. |
+| **Documentation** | 9/10 | Comprehensive README, CONTRIBUTING.md, deploy guide, env vars, config reference, .env.example, app.yml. |
 | **Deployment** | 8/10 | Dockerfile works (multi-stage, native deps handled), docker-compose, volume for SQLite, /healthz endpoint. |
-| **Feature completeness** | 9/10 | Core loop solid: dedup, quality scoring, **LLM code review**, vision alignment, labels, comments, backfill CLI. Cross-PR comparison. Graceful degradation when OpenAI is down. |
-| **Operational readiness** | 8/10 | Structured logging with context, /healthz health check, /metrics Prometheus endpoint, graceful degradation, startup validation, rate limiting, retry with backoff. |
-| **DX** | 7/10 | Clean scripts, vitest, TSX for CLI. Missing: `npm run dev` with smee.io proxy, contributing guide. |
+| **Feature completeness** | 9/10 | Core loop solid: dedup, quality scoring, LLM code review, vision alignment (full diff), labels, comments, backfill CLI, reopen handler. Cross-PR comparison. Graceful degradation. |
+| **Operational readiness** | 8/10 | Structured logging, /healthz, /metrics Prometheus, graceful degradation, startup validation, rate limiting, retry with backoff. |
+| **DX** | 8/10 | `npm run dev` with smee.io, `npm run lint`, CONTRIBUTING.md, vitest, TSX for CLI. |
+
+**Overall: 8.7/10** (up from 8.6)
 
 **Overall: 8.6/10** — Deep code review closes the biggest gap. Cross-PR comparison and weighted scoring make duplicate handling substantive.
 

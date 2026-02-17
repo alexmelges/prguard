@@ -17,8 +17,8 @@ export function buildVisionPrompt(params: {
     params.title,
     "PR body:",
     params.body,
-    "PR diff summary:",
-    params.diffSummary.slice(0, 2000)
+    "PR diff:",
+    params.diffSummary
   ].join("\n\n");
 }
 

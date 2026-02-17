@@ -105,6 +105,7 @@ function createPRPayload(overrides: Record<string, any> = {}) {
 describe("handlePR", () => {
   beforeEach(() => {
     process.env.OPENAI_API_KEY = "test-key";
+    process.env.DATABASE_PATH = ":memory:";
     resetDb();
     resetMetrics();
   });

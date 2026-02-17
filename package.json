@@ -10,7 +10,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "probot run ./dist/index.js",
+    "dev": "npx smee -u $WEBHOOK_PROXY_URL -t http://localhost:3000/api/github/webhooks & probot run ./dist/src/index.js",
+    "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

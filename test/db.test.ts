@@ -5,6 +5,7 @@ import {
   upsertEmbedding,
   listEmbeddings,
   deactivateEmbedding,
+  reactivateEmbedding,
   checkRateLimit,
   upsertAnalysis,
   getAnalysis,
@@ -118,6 +119,31 @@ describe("reviews table", () => {
   it("returns null for missing review", () => {
     const db = makeDb();
     expect(getReview(db, "o/r", "pr", 999)).toBeNull();
+  });
+
+  it("reactivates a deactivated embedding", () => {
+    const db = makeDb();
+    const record: EmbeddingRecord = {
+      repo: "o/r",
+      type: "pr",
+      number: 10,
+      title: "Test",
+      body: "",
+      diffSummary: "",
+      embedding: [0.1, 0.2],
+    };
+    upsertEmbedding(db, record);
+    deactivateEmbedding(db, "o/r", "pr", 10);
+    expect(listEmbeddings(db, "o/r")).toHaveLength(0);
+
+    const reactivated = reactivateEmbedding(db, "o/r", "pr", 10);
+    expect(reactivated).toBe(true);
+    expect(listEmbeddings(db, "o/r")).toHaveLength(1);
+  });
+
+  it("reactivateEmbedding returns false when no deactivated embedding exists", () => {
+    const db = makeDb();
+    expect(reactivateEmbedding(db, "o/r", "pr", 999)).toBe(false);
   });
 
   it("upserts review on conflict", () => {

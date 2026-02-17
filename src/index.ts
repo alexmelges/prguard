@@ -1,6 +1,6 @@
 import type { Probot, ApplicationFunctionOptions } from "probot";
 import type { Request, Response } from "express";
-import { deactivateEmbedding, getDb } from "./db.js";
+import { deactivateEmbedding, reactivateEmbedding, getDb } from "./db.js";
 import { handleIssue } from "./handlers/issue.js";
 import { handlePR } from "./handlers/pr.js";
 import { inc, toPrometheus } from "./metrics.js";
@@ -106,6 +106,33 @@ export default (app: Probot, { getRouter }: ApplicationFunctionOptions): void =>
       const repo = `${context.payload.repository.owner.login}/${context.payload.repository.name}`;
       const number = context.payload.issue.number;
       app.log.error({ error, repo, number, action: "issue.analyze" }, "PRGuard failed processing issue");
+    }
+  });
+
+  app.on("pull_request.reopened", async (context) => {
+    try {
+      const payload = context.payload as {
+        pull_request: { number: number };
+        repository: { name: string; owner: { login: string } };
+      };
+      const owner = payload.repository.owner.login;
+      const repo = payload.repository.name;
+      const number = payload.pull_request.number;
+      const fullRepo = `${owner}/${repo}`;
+      const db = getDb();
+
+      const reactivated = reactivateEmbedding(db, fullRepo, "pr", number);
+      if (reactivated) {
+        app.log.info({ repo: fullRepo, number, action: "pr.reopened" }, `Reactivated embedding for PR #${number}`);
+      } else {
+        app.log.info({ repo: fullRepo, number, action: "pr.reopened" }, `No deactivated embedding found for PR #${number} — will re-analyze`);
+      }
+
+      // Re-run full analysis on reopen
+      await handlePR(app, context);
+    } catch (error) {
+      inc("errors_total");
+      app.log.error({ error, action: "pr.reopened" }, "PRGuard failed handling PR reopen");
     }
   });
 
