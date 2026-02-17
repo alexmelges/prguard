@@ -7,6 +7,9 @@ interface Counters {
   openai_calls_total: number;
   errors_total: number;
   openai_degraded_total: number;
+  commands_processed_total: number;
+  reopens_total: number;
+  rate_limited_total: number;
 }
 
 const counters: Counters = {
@@ -16,6 +19,9 @@ const counters: Counters = {
   openai_calls_total: 0,
   errors_total: 0,
   openai_degraded_total: 0,
+  commands_processed_total: 0,
+  reopens_total: 0,
+  rate_limited_total: 0,
 };
 
 export function inc(key: keyof Counters, amount = 1): void {

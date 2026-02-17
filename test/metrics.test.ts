@@ -24,6 +24,16 @@ describe("metrics", () => {
     expect(get("errors_total")).toBe(0);
   });
 
+  it("tracks new counter types", () => {
+    inc("commands_processed_total");
+    inc("reopens_total", 2);
+    inc("rate_limited_total");
+
+    expect(get("commands_processed_total")).toBe(1);
+    expect(get("reopens_total")).toBe(2);
+    expect(get("rate_limited_total")).toBe(1);
+  });
+
   it("outputs Prometheus text format", () => {
     inc("prs_analyzed_total", 10);
     inc("duplicates_found_total", 3);

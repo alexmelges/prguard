@@ -79,6 +79,7 @@ export async function handleIssue(app: Probot, context: { octokit: any; payload:
 
   if (!checkRateLimit(db, fullRepo, OPENAI_BUDGET_PER_HOUR)) {
     log.warn({ repo: fullRepo, number, action: "issue.rate_limited" }, `Rate limit exceeded for ${fullRepo} — skipping`);
+    inc("rate_limited_total");
     return;
   }
 

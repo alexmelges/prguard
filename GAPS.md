@@ -33,4 +33,8 @@ When duplicates exist, comparison uses stored reviews. If a duplicate PR was ana
 - ~~Deep Code Review~~ ✅ LLM-powered review in `src/review.ts`
 - ~~Full Diff Access for Vision~~ ✅ Vision now gets same expanded diff as code review
 - ~~PR Reopened Events~~ ✅ `pull_request.reopened` handler + `reactivateEmbedding()`
+- ~~Issue Reopened Events~~ ✅ `issues.reopened` handler + `reactivateEmbedding()`
+- ~~Landing Page~~ ✅ HTML landing page at `/` route
+- ~~Richer Metrics~~ ✅ Added `commands_processed_total`, `reopens_total`, `rate_limited_total`
+- ~~CONTRIBUTING.md~~ ✅ Developer guide added
 - ~~Cross-PR Comparison Comment~~ ✅ `buildCrossComparison()` in comments

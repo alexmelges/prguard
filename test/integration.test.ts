@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 import { buildSummaryComment } from "../src/comment.js";
-import { migrate, upsertAnalysis, upsertEmbedding, listEmbeddings, getAnalysis } from "../src/db.js";
+import { migrate, upsertAnalysis, upsertEmbedding, listEmbeddings, getAnalysis, deactivateEmbedding, reactivateEmbedding } from "../src/db.js";
 import type { AnalysisRecord, EmbeddingRecord } from "../src/types.js";
 
 describe("integration", () => {
@@ -48,5 +48,36 @@ describe("integration", () => {
 
     expect(comment).toContain("PRGuard Triage Summary");
     expect(comment).toContain("strongest implementation");
+  });
+
+  it("deactivates and reactivates embeddings on close/reopen", () => {
+    const db = new Database(":memory:");
+    migrate(db);
+
+    const embedding: EmbeddingRecord = {
+      repo: "o/r",
+      type: "issue",
+      number: 10,
+      title: "Bug report",
+      body: "Something is broken",
+      diffSummary: "",
+      embedding: [0.3, 0.4]
+    };
+
+    upsertEmbedding(db, embedding);
+    expect(listEmbeddings(db, "o/r")).toHaveLength(1);
+
+    // Close — deactivate
+    deactivateEmbedding(db, "o/r", "issue", 10);
+    expect(listEmbeddings(db, "o/r")).toHaveLength(0);
+
+    // Reopen — reactivate
+    const reactivated = reactivateEmbedding(db, "o/r", "issue", 10);
+    expect(reactivated).toBe(true);
+    expect(listEmbeddings(db, "o/r")).toHaveLength(1);
+
+    // Reactivating a non-existent embedding returns false
+    const noOp = reactivateEmbedding(db, "o/r", "issue", 999);
+    expect(noOp).toBe(false);
   });
 });

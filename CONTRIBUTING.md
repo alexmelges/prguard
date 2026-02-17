@@ -1,80 +1,80 @@
 # Contributing to PRGuard
 
-## Prerequisites
+Thanks for your interest in contributing! Here's how to get started.
 
-- Node.js ≥ 20
-- An OpenAI API key (`OPENAI_API_KEY`)
-- A GitHub App (for end-to-end testing)
-
-## Setup
+## Development Setup
 
 ```bash
 git clone https://github.com/your-org/prguard
 cd prguard
 npm install
+```
+
+## Running Locally
+
+```bash
 cp .env.example .env
-# Fill in OPENAI_API_KEY, APP_ID, PRIVATE_KEY, WEBHOOK_SECRET
-```
-
-## Development
-
-### Build & typecheck
-
-```bash
-npm run build      # Compile TypeScript to dist/
-npm run lint       # Typecheck without emitting (tsc --noEmit)
-```
-
-### Run tests
-
-```bash
-npm test           # Run all tests once
-npm run test:watch # Watch mode
-```
-
-### Local webhook development
-
-PRGuard uses [smee.io](https://smee.io) to proxy GitHub webhooks to your local machine during development.
-
-1. Go to https://smee.io/new and copy the URL
-2. Set `WEBHOOK_PROXY_URL` in your `.env` file
-3. Run:
-
-```bash
-npm run build
+# Fill in APP_ID, PRIVATE_KEY, WEBHOOK_SECRET, OPENAI_API_KEY
 npm run dev
 ```
 
-This starts `smee` to forward webhooks and `probot` to run the app.
+Use [smee.io](https://smee.io) to forward GitHub webhooks to your local instance.
 
-### Project structure
+## Code Standards
+
+- **TypeScript ESM** with strict mode
+- **Vitest** for testing — all tests must pass before merging
+- Run `npx tsc --noEmit` to typecheck
+- Run `npx vitest run` to run the full test suite
+
+## Project Structure
 
 ```
 src/
-  index.ts       — Probot app entry, event routing
-  handlers/
-    pr.ts        — Pull request handler (embed, dedup, score, review, comment)
-    issue.ts     — Issue handler
-  db.ts          — SQLite schema, queries
-  embed.ts       — OpenAI embeddings + retry logic
-  vision.ts      — Vision alignment evaluation
-  review.ts      — LLM code review
-  comment.ts     — Markdown comment builder
-  config.ts      — .github/prguard.yml config loader
-  quality.ts     — PR quality scoring
-  dedup.ts       — Cosine similarity duplicate detection
-  labels.ts      — GitHub label management
-  metrics.ts     — Prometheus metrics
-  util.ts        — Shared helpers
-  types.ts       — TypeScript types
-  cli.ts         — Backfill CLI
-test/
-  *.test.ts      — Vitest tests
+├── index.ts          # Event handlers + routes
+├── handlers/
+│   ├── pr.ts         # Pull request analysis
+│   ├── issue.ts      # Issue analysis
+│   └── command.ts    # Slash command handling
+├── db.ts             # SQLite schema + queries
+├── embed.ts          # OpenAI embeddings
+├── dedup.ts          # Cosine similarity
+├── vision.ts         # LLM vision alignment
+├── quality.ts        # PR quality scoring
+├── review.ts         # Deep code review
+├── comment.ts        # Markdown comment rendering
+├── labels.ts         # GitHub label management
+├── config.ts         # Repo config loading
+├── metrics.ts        # Prometheus counters
+├── rate-limit.ts     # Per-installation rate limits
+├── github.ts         # GitHub API retry wrapper
+├── util.ts           # Shared utilities
+├── types.ts          # TypeScript interfaces
+├── cli.ts            # Backfill CLI
+└── start.ts          # Entry point
 ```
 
-## Code style
+## Testing
 
-- Use `app.log` for logging (never `console.log`)
-- All OpenAI calls go through `withRetry()` from `embed.ts`
-- Database access via `getDb()` singleton
-- Types in `types.ts`, config in `config.ts`
+```bash
+npm test              # Run all tests
+npx vitest --watch    # Watch mode
+npx vitest run -t "pattern"  # Run specific tests
+```
+
+Tests mock all external APIs (GitHub, OpenAI). No real API calls are made during tests.
+
+## Submitting Changes
+
+1. Fork the repo and create a feature branch
+2. Make your changes with tests
+3. Ensure `npx tsc --noEmit` and `npx vitest run` pass
+4. Submit a PR with a clear description
+
+## Architecture Decisions
+
+- **SQLite** over Postgres — single-binary deployment, no external DB needed
+- **Probot** for GitHub App framework — handles auth, webhooks, rate limiting
+- **Graceful degradation** — if OpenAI is down, PRGuard still labels `needs-review`
+- **Idempotent comments** — PRGuard finds/updates its own comment instead of creating duplicates
+- **BYOK** — repos can bring their own OpenAI key to avoid shared quota

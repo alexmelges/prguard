@@ -72,6 +72,46 @@ export default (app: Probot, { getRouter }: ApplicationFunctionOptions): void =>
   // Health check and metrics endpoints
   if (getRouter) {
     const router = getRouter();
+    router.get("/", (_req: Request, res: Response) => {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PRGuard — Automated PR &amp; Issue Triage</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 640px; margin: 80px auto; padding: 0 20px; color: #1a1a2e; line-height: 1.6; }
+    h1 { font-size: 2.5rem; margin-bottom: 0.25rem; }
+    .subtitle { color: #555; font-size: 1.1rem; margin-bottom: 2rem; }
+    .features { list-style: none; padding: 0; }
+    .features li { padding: 0.4rem 0; }
+    .cta { display: inline-block; background: #238636; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600; margin-top: 1.5rem; }
+    .cta:hover { background: #2ea043; }
+    .links { margin-top: 2rem; color: #555; }
+    .links a { color: #0969da; text-decoration: none; }
+    .links a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>🛡️ PRGuard</h1>
+  <p class="subtitle">Automated PR &amp; Issue triage for GitHub — duplicate detection, quality scoring, and vision alignment.</p>
+  <ul class="features">
+    <li>🔍 <strong>Duplicate Detection</strong> — Embeddings-based similarity search</li>
+    <li>📊 <strong>PR Quality Scoring</strong> — Diff size, tests, commit hygiene, CI status</li>
+    <li>🎯 <strong>Vision Alignment</strong> — LLM evaluation against your project goals</li>
+    <li>📝 <strong>Deep Code Review</strong> — AI-powered review with cross-PR comparison</li>
+    <li>🏷️ <strong>Auto-labeling</strong> — duplicate, off-scope, on-track, recommended</li>
+    <li>⚡ <strong>Rate Limiting &amp; BYOK</strong> — Per-installation budgets, bring your own key</li>
+  </ul>
+  <a class="cta" href="https://github.com/apps/prguard">Install on GitHub →</a>
+  <div class="links">
+    <p><a href="/healthz">Health Check</a> · <a href="/metrics">Metrics</a> · <a href="https://github.com/your-org/prguard">Source Code</a></p>
+  </div>
+</body>
+</html>`);
+    });
+
     router.get("/healthz", (_req: Request, res: Response) => {
       try {
         const db = getDb();
@@ -129,6 +169,7 @@ export default (app: Probot, { getRouter }: ApplicationFunctionOptions): void =>
         app.log.info({ repo: fullRepo, number, action: "pr.reopened" }, `No deactivated embedding found for PR #${number} — will re-analyze`);
       }
 
+      inc("reopens_total");
       // Re-run full analysis on reopen
       await handlePR(app, context);
     } catch (error) {
@@ -143,6 +184,35 @@ export default (app: Probot, { getRouter }: ApplicationFunctionOptions): void =>
     } catch (error) {
       inc("errors_total");
       app.log.error({ error, action: "pr.closed" }, "PRGuard failed handling PR close");
+    }
+  });
+
+  app.on("issues.reopened", async (context) => {
+    try {
+      const payload = context.payload as {
+        issue: { number: number; pull_request?: unknown };
+        repository: { name: string; owner: { login: string } };
+      };
+      if (payload.issue.pull_request) return;
+      const owner = payload.repository.owner.login;
+      const repo = payload.repository.name;
+      const number = payload.issue.number;
+      const fullRepo = `${owner}/${repo}`;
+      const db = getDb();
+
+      const reactivated = reactivateEmbedding(db, fullRepo, "issue", number);
+      if (reactivated) {
+        app.log.info({ repo: fullRepo, number, action: "issue.reopened" }, `Reactivated embedding for issue #${number}`);
+      } else {
+        app.log.info({ repo: fullRepo, number, action: "issue.reopened" }, `No deactivated embedding found for issue #${number} — will re-analyze`);
+      }
+
+      inc("reopens_total");
+      // Re-run full analysis on reopen
+      await handleIssue(app, context);
+    } catch (error) {
+      inc("errors_total");
+      app.log.error({ error, action: "issue.reopened" }, "PRGuard failed handling issue reopen");
     }
   });
 

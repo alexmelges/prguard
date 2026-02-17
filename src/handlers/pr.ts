@@ -206,6 +206,7 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
   // Rate limit check
   if (!checkRateLimit(db, fullRepo, OPENAI_BUDGET_PER_HOUR)) {
     log.warn({ repo: fullRepo, number, action: "pr.rate_limited" }, `Rate limit exceeded for ${fullRepo} — skipping OpenAI calls`);
+    inc("rate_limited_total");
     return;
   }
 

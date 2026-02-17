@@ -129,6 +129,8 @@ export async function handleCommand(app: Probot, context: { octokit: any; payloa
     `Received /prguard ${command.kind} from ${commenter} on ${itemType} #${number}`
   );
 
+  inc("commands_processed_total");
+
   // Permission check
   const authorized = await hasWriteAccess(context.octokit, owner, repo, commenter);
   if (!authorized) {
