@@ -1,6 +1,7 @@
 import type { Probot, ApplicationFunctionOptions } from "probot";
 import type { Request, Response } from "express";
 import { deactivateEmbedding, reactivateEmbedding, getDb } from "./db.js";
+import { handleCommand } from "./handlers/command.js";
 import { handleIssue } from "./handlers/issue.js";
 import { handlePR } from "./handlers/pr.js";
 import { inc, toPrometheus } from "./metrics.js";
@@ -151,6 +152,17 @@ export default (app: Probot, { getRouter }: ApplicationFunctionOptions): void =>
     } catch (error) {
       inc("errors_total");
       app.log.error({ error, action: "issue.closed" }, "PRGuard failed handling issue close");
+    }
+  });
+
+  app.on("issue_comment.created", async (context) => {
+    try {
+      await handleCommand(app, context);
+    } catch (error) {
+      inc("errors_total");
+      const repo = `${context.payload.repository.owner.login}/${context.payload.repository.name}`;
+      const number = context.payload.issue.number;
+      app.log.error({ error, repo, number, action: "command.error" }, "PRGuard failed processing command");
     }
   });
 };

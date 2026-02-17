@@ -165,6 +165,36 @@ export function listEmbeddings(db: Database.Database, repo: string, limit = 500)
   }));
 }
 
+/** Get a single embedding record by repo/type/number. */
+export function getEmbeddingRecord(db: Database.Database, repo: string, type: ItemType, number: number): EmbeddingRecord | null {
+  const row = db
+    .prepare(
+      `SELECT repo, type, number, title, body, diff_summary, embedding, active
+       FROM embeddings
+       WHERE repo = ? AND type = ? AND number = ?`
+    )
+    .get(repo, type, number) as EmbeddingRow | undefined;
+
+  if (!row) return null;
+
+  return {
+    repo: row.repo,
+    type: row.type,
+    number: row.number,
+    title: row.title,
+    body: row.body,
+    diffSummary: row.diff_summary,
+    embedding: JSON.parse(row.embedding) as number[],
+    active: row.active === 1
+  };
+}
+
+/** Delete analysis and review records for a given item. */
+export function deleteAnalysisAndReview(db: Database.Database, repo: string, type: ItemType, number: number): void {
+  db.prepare("DELETE FROM analyses WHERE repo = ? AND type = ? AND number = ?").run(repo, type, number);
+  db.prepare("DELETE FROM reviews WHERE repo = ? AND type = ? AND number = ?").run(repo, type, number);
+}
+
 /** Mark an embedding as inactive (soft delete on close/merge). */
 export function deactivateEmbedding(db: Database.Database, repo: string, type: ItemType, number: number): void {
   db.prepare(
