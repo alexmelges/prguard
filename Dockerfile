@@ -23,8 +23,6 @@ COPY --from=builder /app/dist/ dist/
 RUN mkdir -p /data
 ENV DATABASE_PATH=/data/prguard.db
 
-EXPOSE 3000
-ENV PORT=3000
 ENV NODE_ENV=production
 
 CMD ["node", "./dist/src/start.js"]
