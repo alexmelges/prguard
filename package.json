@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "description": "GitHub App for PR/Issue triage, de-duplication, and vision enforcement",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
   "engines": {
     "node": ">=20"
   },

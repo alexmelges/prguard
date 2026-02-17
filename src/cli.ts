@@ -9,7 +9,7 @@
  */
 
 import { Octokit } from "@octokit/rest";
-import { createDb, upsertEmbedding } from "./db.js";
+import { createDb, upsertEmbedding, listEmbeddings } from "./db.js";
 import { buildEmbeddingInput, createOpenAIClient, getEmbedding } from "./embed.js";
 import type { EmbeddingRecord } from "./types.js";
 
@@ -36,6 +36,10 @@ async function backfill(fullRepo: string): Promise<void> {
   const openai = createOpenAIClient();
   const db = createDb();
 
+  // Build set of already-processed items to skip
+  const existing = listEmbeddings(db, fullRepo, 10000);
+  const existingKeys = new Set(existing.map((e) => `${e.type}:${e.number}`));
+
   // Backfill open PRs
   logger.info(`Fetching open PRs for ${fullRepo}...`);
   let prPage = 1;
@@ -47,6 +51,10 @@ async function backfill(fullRepo: string): Promise<void> {
     if (prs.length === 0) break;
 
     for (const pr of prs) {
+      if (existingKeys.has(`pr:${pr.number}`)) {
+        logger.info(`Skipping PR #${pr.number} — already embedded`);
+        continue;
+      }
       let diffSummary = "";
       try {
         const { data: files } = await octokit.pulls.listFiles({
@@ -99,6 +107,10 @@ async function backfill(fullRepo: string): Promise<void> {
     if (issues.length === 0) break;
 
     for (const issue of realIssues) {
+      if (existingKeys.has(`issue:${issue.number}`)) {
+        logger.info(`Skipping issue #${issue.number} — already embedded`);
+        continue;
+      }
       const input = buildEmbeddingInput(issue.title, issue.body ?? "");
       const embedding = await getEmbedding(input, openai, undefined, logger);
       if (embedding.length === 0) {

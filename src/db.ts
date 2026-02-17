@@ -205,17 +205,11 @@ export function getAnalysis(
   };
 }
 
-/** Check and increment rate limit counter. Returns true if under budget. */
+/** Check and increment rate limit counter atomically. Returns true if under budget. */
 export function checkRateLimit(db: Database.Database, repo: string, maxPerHour: number): boolean {
   const hour = new Date().toISOString().slice(0, 13); // YYYY-MM-DDTHH
-  const row = db.prepare(
-    "SELECT openai_calls FROM rate_limits WHERE repo = ? AND hour = ?"
-  ).get(repo, hour) as { openai_calls: number } | undefined;
 
-  if (row && row.openai_calls >= maxPerHour) {
-    return false;
-  }
-
+  // Atomic: insert-or-increment, then check if we're over budget
   db.prepare(
     `INSERT INTO rate_limits (repo, hour, openai_calls)
      VALUES (?, ?, 1)
@@ -223,5 +217,9 @@ export function checkRateLimit(db: Database.Database, repo: string, maxPerHour: 
      DO UPDATE SET openai_calls = openai_calls + 1`
   ).run(repo, hour);
 
-  return true;
+  const row = db.prepare(
+    "SELECT openai_calls FROM rate_limits WHERE repo = ? AND hour = ?"
+  ).get(repo, hour) as { openai_calls: number };
+
+  return row.openai_calls <= maxPerHour;
 }
