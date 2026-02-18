@@ -39,12 +39,16 @@ import type {
   PRQualityResult,
   VisionEvaluation
 } from "../types.js";
+import { generateReport, generateWeeklyDigest } from "../digest.js";
 
 export type SlashCommand =
   | { kind: "review" }
   | { kind: "compare"; targetNumber: number }
   | { kind: "config" }
   | { kind: "ignore" }
+  | { kind: "report" }
+  | { kind: "stale"; days: number }
+  | { kind: "digest" }
   | { kind: "help" };
 
 /** Parse a /prguard command from comment body. Returns null if no command found. */
@@ -68,6 +72,14 @@ export function parseCommand(body: string): SlashCommand | null {
       return { kind: "config" };
     case "ignore":
       return { kind: "ignore" };
+    case "report":
+      return { kind: "report" };
+    case "stale": {
+      const daysMatch = args.match(/^(\d+)$/);
+      return { kind: "stale", days: daysMatch ? parseInt(daysMatch[1], 10) : 30 };
+    }
+    case "digest":
+      return { kind: "digest" };
     case "help":
       return { kind: "help" };
     default:
@@ -169,6 +181,15 @@ export async function handleCommand(app: Probot, context: { octokit: any; payloa
     case "compare":
       await handleCompare({ octokit: context.octokit, owner, repo, number, fullRepo, itemType, targetNumber: command.targetNumber, config, log });
       break;
+    case "report":
+      await handleReport(context.octokit, owner, repo, number, fullRepo);
+      break;
+    case "stale":
+      await handleStale(context.octokit, owner, repo, number, command.days);
+      break;
+    case "digest":
+      await handleDigest(context.octokit, owner, repo, number, fullRepo);
+      break;
   }
 
   log.info(
@@ -186,6 +207,10 @@ async function handleHelp(octokit: any, owner: string, repo: string, number: num
     "| `/prguard compare #123` | Compare this PR/issue against another |",
     "| `/prguard config` | Show the repo's current PRGuard configuration |",
     "| `/prguard ignore` | Ignore this PR/issue (skip future analysis, remove labels) |",
+    "| `/prguard report` | Generate a repo health report |",
+    "| `/prguard stale` | List stale issues/PRs (default 30 days) |",
+    "| `/prguard stale 60` | List items stale for 60+ days |",
+    "| `/prguard digest` | Generate a weekly activity digest |",
     "| `/prguard help` | Show this help message |",
     "",
     "Commands require **write** or **admin** access to the repository.",
@@ -379,5 +404,139 @@ async function handleCompare(params: {
     "<sub>🤖 <a href=\"https://github.com/apps/prguard\">PRGuard</a></sub>"
   ].join("\n");
 
+  await octokit.issues.createComment({ owner, repo, issue_number: number, body });
+}
+
+async function handleReport(
+  octokit: any,
+  owner: string,
+  repo: string,
+  number: number,
+  fullRepo: string
+): Promise<void> {
+  const db = getDb();
+  const body = generateReport({ repo: fullRepo, db, repoUrl: `https://github.com/${fullRepo}` });
+  await octokit.issues.createComment({ owner, repo, issue_number: number, body });
+}
+
+async function handleStale(
+  octokit: any,
+  owner: string,
+  repo: string,
+  number: number,
+  days: number
+): Promise<void> {
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  const staleItems: Array<{ type: string; number: number; title: string; updated_at: string; url: string }> = [];
+
+  try {
+    const { data: issues } = await octokit.issues.listForRepo({
+      owner,
+      repo,
+      state: "open",
+      sort: "updated",
+      direction: "asc",
+      per_page: 100,
+    });
+
+    for (const issue of issues) {
+      if (issue.pull_request) continue;
+      if (issue.updated_at < cutoff) {
+        staleItems.push({
+          type: "issue",
+          number: issue.number,
+          title: issue.title,
+          updated_at: issue.updated_at,
+          url: issue.html_url,
+        });
+      }
+    }
+
+    const { data: prs } = await octokit.pulls.list({
+      owner,
+      repo,
+      state: "open",
+      sort: "updated",
+      direction: "asc",
+      per_page: 100,
+    });
+
+    for (const pr of prs) {
+      if (pr.updated_at < cutoff) {
+        staleItems.push({
+          type: "pr",
+          number: pr.number,
+          title: pr.title,
+          updated_at: pr.updated_at,
+          url: pr.html_url,
+        });
+      }
+    }
+  } catch {
+    await octokit.issues.createComment({
+      owner,
+      repo,
+      issue_number: number,
+      body: `> /prguard stale\n\n⚠️ Failed to fetch repository data. Please check that PRGuard has read access.`,
+    });
+    return;
+  }
+
+  if (staleItems.length === 0) {
+    await octokit.issues.createComment({
+      owner,
+      repo,
+      issue_number: number,
+      body: [
+        `## 🛡️ PRGuard — Stale Items\n`,
+        `✅ No items have been inactive for ${days}+ days. Your repo is in great shape!`,
+        "",
+        "---",
+        `<sub>🤖 <a href="https://github.com/apps/prguard">PRGuard</a></sub>`,
+      ].join("\n"),
+    });
+    return;
+  }
+
+  const lines: string[] = [
+    `## 🛡️ PRGuard — Stale Items (${days}+ days)\n`,
+    `Found **${staleItems.length}** items with no activity for ${days}+ days:\n`,
+    `| # | Type | Title | Last Updated |`,
+    `|---|------|-------|-------------|`,
+  ];
+
+  for (const item of staleItems.slice(0, 25)) {
+    const icon = item.type === "pr" ? "🔀" : "🐛";
+    const daysSince = Math.floor((Date.now() - new Date(item.updated_at).getTime()) / (24 * 60 * 60 * 1000));
+    lines.push(
+      `| [#${item.number}](${item.url}) | ${icon} ${item.type} | ${item.title.slice(0, 60)} | ${daysSince}d ago |`
+    );
+  }
+
+  if (staleItems.length > 25) {
+    lines.push(`| ... | | +${staleItems.length - 25} more | |`);
+  }
+
+  lines.push(
+    "",
+    "💡 **Tip:** Consider closing items that are no longer relevant, or use `/prguard ignore` to exclude them from future analysis.",
+    "",
+    "---",
+    `<sub>🤖 <a href="https://github.com/apps/prguard">PRGuard</a></sub>`,
+  );
+
+  await octokit.issues.createComment({ owner, repo, issue_number: number, body: lines.join("\n") });
+}
+
+async function handleDigest(
+  octokit: any,
+  owner: string,
+  repo: string,
+  number: number,
+  fullRepo: string
+): Promise<void> {
+  const db = getDb();
+  const body = generateWeeklyDigest({ repo: fullRepo, db, repoUrl: `https://github.com/${fullRepo}` });
   await octokit.issues.createComment({ owner, repo, issue_number: number, body });
 }

@@ -476,6 +476,181 @@ export function getLastEventTimestamp(db: Database.Database): string | null {
   return row?.created_at ?? null;
 }
 
+// ── Report & Digest queries ────────────────────────────────────────
+
+export interface RepoReport {
+  totalItems: number;
+  activeItems: number;
+  prs: number;
+  issues: number;
+  duplicateCount: number;
+  duplicateRate: number;
+  qualityDist: QualityDistribution;
+  avgQuality: number;
+  eventsLast7Days: number;
+  eventsLast24Hours: number;
+  verdictCounts: { approve: number; review: number; reject: number };
+  topDuplicatePairs: Array<{ number1: number; number2: number; similarity: number; title1: string; title2: string }>;
+}
+
+export function getRepoReport(db: Database.Database, repo: string): RepoReport {
+  const totalItems = (db.prepare("SELECT COUNT(*) AS c FROM embeddings WHERE repo = ?").get(repo) as { c: number }).c;
+  const activeItems = (db.prepare("SELECT COUNT(*) AS c FROM embeddings WHERE repo = ? AND active = 1").get(repo) as { c: number }).c;
+  const prs = (db.prepare("SELECT COUNT(*) AS c FROM embeddings WHERE repo = ? AND type = 'pr' AND active = 1").get(repo) as { c: number }).c;
+  const issues = (db.prepare("SELECT COUNT(*) AS c FROM embeddings WHERE repo = ? AND type = 'issue' AND active = 1").get(repo) as { c: number }).c;
+
+  const dupRow = db.prepare(
+    "SELECT COUNT(*) AS c FROM analyses WHERE repo = ? AND duplicates IS NOT NULL AND duplicates != '[]'"
+  ).get(repo) as { c: number };
+  const duplicateCount = dupRow.c;
+  const totalAnalyses = (db.prepare("SELECT COUNT(*) AS c FROM analyses WHERE repo = ?").get(repo) as { c: number }).c;
+  const duplicateRate = totalAnalyses > 0 ? duplicateCount / totalAnalyses : 0;
+
+  // Quality distribution for this repo
+  const qd = db.prepare(`
+    SELECT
+      SUM(CASE WHEN score >= 8 THEN 1 ELSE 0 END) AS excellent,
+      SUM(CASE WHEN score >= 6 AND score < 8 THEN 1 ELSE 0 END) AS good,
+      SUM(CASE WHEN score >= 4 AND score < 6 THEN 1 ELSE 0 END) AS needs_work,
+      SUM(CASE WHEN score < 4 THEN 1 ELSE 0 END) AS poor
+    FROM (
+      SELECT pr_quality_score AS score FROM analyses WHERE repo = ? AND pr_quality_score IS NOT NULL
+      UNION ALL
+      SELECT quality_score AS score FROM reviews WHERE repo = ?
+    )
+  `).get(repo, repo) as { excellent: number | null; good: number | null; needs_work: number | null; poor: number | null };
+
+  const qualityDist = {
+    excellent: qd.excellent ?? 0,
+    good: qd.good ?? 0,
+    needs_work: qd.needs_work ?? 0,
+    poor: qd.poor ?? 0,
+  };
+
+  const avgRow = db.prepare(
+    "SELECT AVG(pr_quality_score) AS avg FROM analyses WHERE repo = ? AND pr_quality_score IS NOT NULL"
+  ).get(repo) as { avg: number | null };
+
+  const events7d = (db.prepare(
+    "SELECT COUNT(*) AS c FROM events WHERE repo = ? AND created_at >= datetime('now', '-7 days')"
+  ).get(repo) as { c: number }).c;
+
+  const events24h = (db.prepare(
+    "SELECT COUNT(*) AS c FROM events WHERE repo = ? AND created_at >= datetime('now', '-1 day')"
+  ).get(repo) as { c: number }).c;
+
+  // Verdict counts
+  const verdicts = db.prepare(`
+    SELECT
+      SUM(CASE WHEN recommendation = 'approve' THEN 1 ELSE 0 END) AS approve,
+      SUM(CASE WHEN recommendation = 'review' THEN 1 ELSE 0 END) AS review,
+      SUM(CASE WHEN recommendation = 'reject' THEN 1 ELSE 0 END) AS reject
+    FROM analyses WHERE repo = ?
+  `).get(repo) as { approve: number | null; review: number | null; reject: number | null };
+
+  const verdictCounts = {
+    approve: verdicts.approve ?? 0,
+    review: verdicts.review ?? 0,
+    reject: verdicts.reject ?? 0,
+  };
+
+  // Top duplicate pairs (from analyses that have duplicates)
+  const dupRows = db.prepare(`
+    SELECT a.number, a.duplicates, e.title
+    FROM analyses a
+    JOIN embeddings e ON e.repo = a.repo AND e.type = a.type AND e.number = a.number
+    WHERE a.repo = ? AND a.duplicates IS NOT NULL AND a.duplicates != '[]'
+    ORDER BY a.created_at DESC
+    LIMIT 10
+  `).all(repo) as Array<{ number: number; duplicates: string; title: string }>;
+
+  const topDuplicatePairs: RepoReport["topDuplicatePairs"] = [];
+  for (const row of dupRows) {
+    const dups = JSON.parse(row.duplicates) as Array<{ number: number; similarity: number; title: string }>;
+    for (const d of dups.slice(0, 1)) { // top match per item
+      topDuplicatePairs.push({
+        number1: row.number,
+        number2: d.number,
+        similarity: d.similarity,
+        title1: row.title,
+        title2: d.title,
+      });
+    }
+  }
+  topDuplicatePairs.sort((a, b) => b.similarity - a.similarity);
+
+  return {
+    totalItems,
+    activeItems,
+    prs,
+    issues,
+    duplicateCount,
+    duplicateRate,
+    qualityDist,
+    avgQuality: avgRow.avg ?? 0,
+    eventsLast7Days: events7d,
+    eventsLast24Hours: events24h,
+    verdictCounts,
+    topDuplicatePairs: topDuplicatePairs.slice(0, 5),
+  };
+}
+
+export interface WeeklyDigestData {
+  newItems7d: Array<{ type: string; number: number; title: string; created_at: string }>;
+  duplicatesFound7d: number;
+  reviewsCompleted7d: number;
+  avgQuality7d: number;
+  verdicts7d: { approve: number; review: number; reject: number };
+  eventCount7d: number;
+}
+
+export function getWeeklyDigestData(db: Database.Database, repo: string): WeeklyDigestData {
+  const newItems = db.prepare(`
+    SELECT type, number, title, created_at
+    FROM embeddings
+    WHERE repo = ? AND created_at >= datetime('now', '-7 days')
+    ORDER BY created_at DESC
+  `).all(repo) as WeeklyDigestData["newItems7d"];
+
+  const dups = (db.prepare(`
+    SELECT COUNT(*) AS c FROM analyses
+    WHERE repo = ? AND duplicates IS NOT NULL AND duplicates != '[]'
+    AND created_at >= datetime('now', '-7 days')
+  `).get(repo) as { c: number }).c;
+
+  const reviews = (db.prepare(`
+    SELECT COUNT(*) AS c FROM reviews
+    WHERE repo = ? AND created_at >= datetime('now', '-7 days')
+  `).get(repo) as { c: number }).c;
+
+  const avgQ = (db.prepare(`
+    SELECT AVG(pr_quality_score) AS avg FROM analyses
+    WHERE repo = ? AND pr_quality_score IS NOT NULL AND created_at >= datetime('now', '-7 days')
+  `).get(repo) as { avg: number | null }).avg ?? 0;
+
+  const v = db.prepare(`
+    SELECT
+      SUM(CASE WHEN recommendation = 'approve' THEN 1 ELSE 0 END) AS approve,
+      SUM(CASE WHEN recommendation = 'review' THEN 1 ELSE 0 END) AS review,
+      SUM(CASE WHEN recommendation = 'reject' THEN 1 ELSE 0 END) AS reject
+    FROM analyses WHERE repo = ? AND created_at >= datetime('now', '-7 days')
+  `).get(repo) as { approve: number | null; review: number | null; reject: number | null };
+
+  const events = (db.prepare(`
+    SELECT COUNT(*) AS c FROM events
+    WHERE repo = ? AND created_at >= datetime('now', '-7 days')
+  `).get(repo) as { c: number }).c;
+
+  return {
+    newItems7d: newItems,
+    duplicatesFound7d: dups,
+    reviewsCompleted7d: reviews,
+    avgQuality7d: avgQ,
+    verdicts7d: { approve: v.approve ?? 0, review: v.review ?? 0, reject: v.reject ?? 0 },
+    eventCount7d: events,
+  };
+}
+
 /** Check and increment rate limit counter atomically. Returns true if under budget. */
 export function checkRateLimit(db: Database.Database, repo: string, maxPerHour: number): boolean {
   const hour = new Date().toISOString().slice(0, 13); // YYYY-MM-DDTHH

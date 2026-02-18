@@ -81,6 +81,22 @@ describe("parseCommand", () => {
     expect(parseCommand("/prguard ignore")).toEqual({ kind: "ignore" });
   });
 
+  it("parses /prguard report", () => {
+    expect(parseCommand("/prguard report")).toEqual({ kind: "report" });
+  });
+
+  it("parses /prguard stale with default days", () => {
+    expect(parseCommand("/prguard stale")).toEqual({ kind: "stale", days: 30 });
+  });
+
+  it("parses /prguard stale with custom days", () => {
+    expect(parseCommand("/prguard stale 60")).toEqual({ kind: "stale", days: 60 });
+  });
+
+  it("parses /prguard digest", () => {
+    expect(parseCommand("/prguard digest")).toEqual({ kind: "digest" });
+  });
+
   it("parses /prguard compare #123", () => {
     expect(parseCommand("/prguard compare #123")).toEqual({ kind: "compare", targetNumber: 123 });
   });
@@ -289,6 +305,105 @@ describe("handleCommand", () => {
 
       const { handleIssue } = await import("../../src/handlers/issue.js");
       expect(handleIssue).toHaveBeenCalled();
+    });
+  });
+
+  describe("/prguard report", () => {
+    it("posts repo health report", async () => {
+      const app = createMockApp();
+      const octokit = createMockOctokit();
+      const payload = createCommentPayload("/prguard report");
+
+      const db = getDb();
+      upsertEmbedding(db, {
+        repo: "myorg/myrepo",
+        type: "pr",
+        number: 1,
+        title: "Test PR",
+        body: "test",
+        diffSummary: "",
+        embedding: [0.1, 0.2],
+      });
+
+      await handleCommand(app, { octokit, payload });
+
+      expect(octokit.issues.createComment).toHaveBeenCalledTimes(1);
+      const body = octokit.issues.createComment.mock.calls[0][0].body;
+      expect(body).toContain("Repository Health Report");
+      expect(body).toContain("myorg/myrepo");
+      expect(body).toContain("Overview");
+    });
+  });
+
+  describe("/prguard stale", () => {
+    it("reports no stale items when repo is fresh", async () => {
+      const app = createMockApp();
+      const octokit = createMockOctokit();
+      octokit.issues.listForRepo = vi.fn().mockResolvedValue({
+        data: [{
+          number: 1,
+          title: "Fresh issue",
+          updated_at: new Date().toISOString(),
+          html_url: "https://github.com/myorg/myrepo/issues/1",
+        }],
+      });
+      octokit.pulls = { list: vi.fn().mockResolvedValue({ data: [] }) };
+      const payload = createCommentPayload("/prguard stale");
+
+      await handleCommand(app, { octokit, payload });
+
+      const body = octokit.issues.createComment.mock.calls[0][0].body;
+      expect(body).toContain("No items have been inactive");
+    });
+
+    it("lists stale items", async () => {
+      const app = createMockApp();
+      const octokit = createMockOctokit();
+      const staleDate = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+      octokit.issues.listForRepo = vi.fn().mockResolvedValue({
+        data: [{
+          number: 5,
+          title: "Old bug",
+          updated_at: staleDate,
+          html_url: "https://github.com/myorg/myrepo/issues/5",
+        }],
+      });
+      octokit.pulls = { list: vi.fn().mockResolvedValue({ data: [] }) };
+      const payload = createCommentPayload("/prguard stale");
+
+      await handleCommand(app, { octokit, payload });
+
+      const body = octokit.issues.createComment.mock.calls[0][0].body;
+      expect(body).toContain("Stale Items");
+      expect(body).toContain("#5");
+      expect(body).toContain("Old bug");
+    });
+
+    it("handles API errors gracefully", async () => {
+      const app = createMockApp();
+      const octokit = createMockOctokit();
+      octokit.issues.listForRepo = vi.fn().mockRejectedValue(new Error("API error"));
+      const payload = createCommentPayload("/prguard stale");
+
+      await handleCommand(app, { octokit, payload });
+
+      const body = octokit.issues.createComment.mock.calls[0][0].body;
+      expect(body).toContain("Failed to fetch");
+    });
+  });
+
+  describe("/prguard digest", () => {
+    it("posts weekly digest", async () => {
+      const app = createMockApp();
+      const octokit = createMockOctokit();
+      const payload = createCommentPayload("/prguard digest");
+
+      await handleCommand(app, { octokit, payload });
+
+      expect(octokit.issues.createComment).toHaveBeenCalledTimes(1);
+      const body = octokit.issues.createComment.mock.calls[0][0].body;
+      expect(body).toContain("Weekly Digest");
+      expect(body).toContain("myorg/myrepo");
     });
   });
 

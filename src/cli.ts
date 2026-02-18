@@ -11,6 +11,7 @@
 import { Octokit } from "@octokit/rest";
 import { createDb, upsertEmbedding, listEmbeddings } from "./db.js";
 import { buildEmbeddingInput, createOpenAIClient, getEmbedding } from "./embed.js";
+import { generateReport, generateWeeklyDigest } from "./digest.js";
 import type { EmbeddingRecord } from "./types.js";
 
 const logger = {
@@ -142,16 +143,34 @@ async function backfill(fullRepo: string): Promise<void> {
 const command = process.argv[2];
 const target = process.argv[3];
 
+function report(fullRepo: string): void {
+  const db = createDb();
+  const md = generateReport({ repo: fullRepo, db, repoUrl: `https://github.com/${fullRepo}` });
+  console.log(md);
+}
+
+function digest(fullRepo: string): void {
+  const db = createDb();
+  const md = generateWeeklyDigest({ repo: fullRepo, db, repoUrl: `https://github.com/${fullRepo}` });
+  console.log(md);
+}
+
 if (command === "backfill" && target) {
   backfill(target).catch((err) => {
     logger.error(String(err));
     process.exit(1);
   });
+} else if (command === "report" && target) {
+  report(target);
+} else if (command === "digest" && target) {
+  digest(target);
 } else {
   console.log("PRGuard CLI");
   console.log("");
   console.log("Commands:");
   console.log("  backfill <owner/repo>  Embed all open PRs and issues");
+  console.log("  report <owner/repo>    Generate repo health report");
+  console.log("  digest <owner/repo>    Generate weekly activity digest");
   console.log("");
   console.log("Environment:");
   console.log("  GITHUB_TOKEN    GitHub personal access token");
