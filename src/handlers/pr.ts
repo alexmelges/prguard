@@ -30,6 +30,8 @@ import type {
 import { evaluateVision } from "../vision.js";
 import { reviewPR, buildCrossComparison } from "../review.js";
 import { checkInstallationRateLimit, incrementInstallationRateLimit } from "../rate-limit.js";
+import { lintReadiness } from "../readiness.js";
+import type { ReadinessSuggestion } from "../readiness.js";
 import {
   isBot,
   normalizeBody,
@@ -349,6 +351,23 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
 
   const bestPRNumber = pickBestPR(number, duplicates, quality, vision, codeReview, db, fullRepo);
 
+  // Agent-readiness lint (suggestion-only, non-blocking)
+  let repoRootFiles: string[] = [];
+  try {
+    const rootContents = await context.octokit.repos.getContent({ owner, repo, path: "" });
+    if (Array.isArray(rootContents.data)) {
+      repoRootFiles = rootContents.data.map((f: { path: string }) => f.path);
+    }
+  } catch {
+    // Non-critical — proceed with empty list
+  }
+
+  const readinessSuggestions: ReadinessSuggestion[] = lintReadiness({
+    changedFiles: files.data.map((f: { filename: string }) => f.filename),
+    repoRootFiles,
+    diffText: fullDiff,
+  });
+
   const labelsToApply = [config.labels.needs_review];
   if (duplicates.length > 0) {
     labelsToApply.push(config.labels.duplicate);
@@ -390,7 +409,8 @@ export async function handlePR(app: Probot, context: { octokit: any; payload: an
     quality,
     bestPRNumber: duplicates.length > 0 ? bestPRNumber : null,
     review: codeReview,
-    crossComparison
+    crossComparison,
+    readinessSuggestions,
   });
 
   await upsertSummaryComment({
