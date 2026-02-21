@@ -1,4 +1,6 @@
 import type { CodeReview, DuplicateMatch, PRQualityResult, VisionEvaluation } from "./types.js";
+import type { ReadinessSuggestion } from "./readiness.js";
+import { formatReadinessSuggestions } from "./readiness.js";
 
 const MARKER = "<!-- prguard:summary -->";
 
@@ -42,6 +44,7 @@ export function buildSummaryComment(params: {
   bestPRNumber: number | null;
   review: CodeReview | null;
   crossComparison: string | null;
+  readinessSuggestions?: ReadinessSuggestion[];
 }): string {
   const parts = [
     MARKER,
@@ -103,6 +106,11 @@ export function buildSummaryComment(params: {
       "\n### 🏆 Recommendation",
       `PR #${params.bestPRNumber} appears to be the strongest implementation among related submissions.`
     );
+  }
+
+  const readinessSection = formatReadinessSuggestions(params.readinessSuggestions ?? []);
+  if (readinessSection) {
+    parts.push(readinessSection);
   }
 
   parts.push(
