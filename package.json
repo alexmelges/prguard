@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "backfill": "npx tsx src/cli.ts backfill"
+    "backfill": "npx tsx src/cli.ts backfill",
+    "prepublish:pr": "bash scripts/prepublish-pr-check.sh"
   },
   "keywords": [
     "github-app",
