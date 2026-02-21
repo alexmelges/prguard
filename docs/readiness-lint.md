@@ -34,6 +34,27 @@ commands, cron jobs) but includes no test or fixture file changes.
 **Why it matters:** Automated agents verifying behavior need replay fixtures or
 tests as a minimal correctness signal.
 
+### `readiness/docs-vs-code-drift`
+
+**Triggers when:** A PR modifies documentation files (`.md`, `.mdx`, `.rst`,
+or files under `docs/`) and the added lines claim syntax or provider support
+that cannot be found in the implementation.
+
+**Detected patterns (v1):**
+
+| Docs claim | What PRGuard looks for in code |
+|---|---|
+| `${env:VAR}` substitution | `parseEnvSubstitution`, `envPrefix`, or literal `${env:` usage |
+| `${keyring:...}` provider | `keyring`, `KeyringProvider`, `resolveKeyring` |
+| `op://vault/item/field` (1Password) | `op://`, `OnePasswordProvider`, `resolve1Password` |
+
+**Why it matters:** Docs that advertise unsupported syntax cause integration
+failures for agents and users who trust the documentation as the contract.
+
+**Conservatism:** The rule only fires when it has sufficient evidence of a
+mismatch. If implementation files are changed in the same PR but their content
+is unavailable for scanning, the rule stays silent to avoid false positives.
+
 ## Behavior
 
 - All rules emit **suggestions only** — they never block a PR.

@@ -19,6 +19,11 @@ export interface ReadinessInput {
   repoRootFiles: string[];
   /** Patch/diff content concatenated (used for heuristic scanning). */
   diffText: string;
+  /**
+   * Optional: full content of implementation files the caller resolved,
+   * keyed by repo-relative path. Used by docs-vs-code drift checks.
+   */
+  fileContents?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +152,185 @@ function checkReplayTestSignal(input: ReadinessInput): ReadinessSuggestion | nul
 }
 
 // ---------------------------------------------------------------------------
+// Rule: docs-vs-code contract drift
+// ---------------------------------------------------------------------------
+
+/** Patterns we look for in docs that imply specific implementation support. */
+interface DriftPattern {
+  /** Human-readable name for the syntax/feature. */
+  name: string;
+  /** Regex that matches claims in docs (applied to added lines only). */
+  docsPattern: RegExp;
+  /**
+   * Regex that should match somewhere in the implementation if the claim is
+   * valid. When `implPattern` is absent the rule checks `implPathPattern`.
+   */
+  implPattern?: RegExp;
+  /**
+   * Glob-ish regex for file paths that would contain the implementation.
+   * If none of the known files match, the claim is suspicious.
+   */
+  implPathPattern?: RegExp;
+  /** Remediation hint shown to the author. */
+  remediation: string;
+}
+
+const DRIFT_PATTERNS: DriftPattern[] = [
+  {
+    name: "${env:VAR} substitution syntax",
+    docsPattern: /\$\{env:[^}]+\}/,
+    implPattern: /\$\{env:[^}]*\}|env\s*:\s*|parseEnvSubstitution|envPrefix/i,
+    remediation:
+      "The implementation appears to use `${VAR}` (plain env) rather than " +
+      "`${env:...}` namespaced syntax. Update the docs to match, or add " +
+      "a resolver for the `env:` prefix.",
+  },
+  {
+    name: "${keyring:...} provider syntax",
+    docsPattern: /\$\{keyring:[^}]+\}/,
+    implPattern: /keyring|KeyringProvider|resolveKeyring/i,
+    remediation:
+      "No `keyring` resolver implementation was found. " +
+      "Remove the docs reference or implement the provider.",
+  },
+  {
+    name: "op:// (1Password) provider syntax",
+    docsPattern: /op:\/\/[^\s)}`'"]*/,
+    implPattern: /op:\/\/|OnePasswordProvider|resolve1Password|opResolver/i,
+    remediation:
+      "No 1Password (`op://`) resolver implementation was found. " +
+      "Remove the docs reference or implement the provider.",
+  },
+];
+
+/**
+ * Detects when docs changes in a PR claim syntax or contracts that are not
+ * supported by the implementation (conservative, suggestion-only).
+ */
+function checkDocsVsCodeDrift(input: ReadinessInput): ReadinessSuggestion[] {
+  const results: ReadinessSuggestion[] = [];
+
+  // Only inspect when docs files are changed.
+  const docFiles = input.changedFiles.filter((f) =>
+    /\.(md|mdx|rst|txt)$/i.test(f) ||
+    /^docs?\//i.test(f) ||
+    /readme/i.test(f)
+  );
+  if (docFiles.length === 0) return results;
+
+  // Extract added lines from the diff that belong to docs files.
+  // We look for unified-diff hunks: lines starting with "+" (not "+++").
+  const addedDocsLines = extractAddedDocsLines(input.diffText, docFiles);
+  if (addedDocsLines.length === 0) return results;
+
+  const addedText = addedDocsLines.join("\n");
+
+  // Aggregate all known implementation content for pattern scanning.
+  const implText = input.fileContents
+    ? Object.values(input.fileContents).join("\n")
+    : "";
+
+  for (const pattern of DRIFT_PATTERNS) {
+    if (!pattern.docsPattern.test(addedText)) continue;
+
+    // Find the offending line(s) for evidence.
+    const offendingLines = addedDocsLines.filter((l) =>
+      pattern.docsPattern.test(l)
+    );
+
+    // Check implementation evidence.
+    let hasImplSupport = false;
+
+    if (pattern.implPattern && implText) {
+      hasImplSupport = pattern.implPattern.test(implText);
+    }
+
+    // If we have no impl content to scan, also check if the diff itself
+    // contains implementation changes that match (self-contained PRs).
+    if (!hasImplSupport && pattern.implPattern) {
+      // Only check non-docs portions of the diff.
+      const nonDocsChanged = input.changedFiles.some(
+        (f) =>
+          !/\.(md|mdx|rst|txt)$/i.test(f) &&
+          !/^docs?\//i.test(f) &&
+          !/readme/i.test(f)
+      );
+      if (nonDocsChanged && pattern.implPattern.test(input.diffText)) {
+        hasImplSupport = true;
+      }
+    }
+
+    if (hasImplSupport) continue;
+
+    // If no fileContents were provided at all, only flag if the PR is
+    // docs-only (no impl files changed) to stay conservative.
+    if (!input.fileContents) {
+      const hasImplChanges = input.changedFiles.some(
+        (f) =>
+          !/\.(md|mdx|rst|txt)$/i.test(f) &&
+          !/^docs?\//i.test(f) &&
+          !/readme/i.test(f)
+      );
+      if (hasImplChanges) continue; // can't verify → skip to avoid FP
+    }
+
+    const snippet =
+      offendingLines.length > 0
+        ? offendingLines[0].trim().substring(0, 120)
+        : "";
+
+    results.push({
+      rule: "readiness/docs-vs-code-drift",
+      message:
+        `Docs claim **${pattern.name}** support ` +
+        (snippet ? `(\`${snippet}\`) ` : "") +
+        `but no matching implementation was found. ` +
+        pattern.remediation,
+      severity: "suggestion",
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Extract added lines from unified diff that belong to the given doc files.
+ * Conservative: only considers lines starting with "+" in hunks under a
+ * matching file header.
+ */
+function extractAddedDocsLines(
+  diffText: string,
+  docFiles: string[]
+): string[] {
+  if (!diffText) return [];
+
+  const lines = diffText.split("\n");
+  const added: string[] = [];
+  let inDocFile = false;
+
+  for (const line of lines) {
+    // Detect file header (--- a/path or +++ b/path).
+    if (line.startsWith("+++ b/") || line.startsWith("+++ a/")) {
+      const filePath = line.slice(6);
+      inDocFile = docFiles.some(
+        (df) => filePath === df || filePath.endsWith("/" + df)
+      );
+      continue;
+    }
+    if (line.startsWith("--- ")) continue;
+
+    if (inDocFile && line.startsWith("+") && !line.startsWith("+++")) {
+      added.push(line.slice(1)); // strip leading "+"
+    }
+  }
+
+  return added;
+}
+
+// Re-export for testing.
+export { extractAddedDocsLines as _extractAddedDocsLines };
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -166,6 +350,10 @@ export function lintReadiness(input: ReadinessInput): ReadinessSuggestion[] {
     const result = check(input);
     if (result) suggestions.push(result);
   }
+
+  // Multi-result rules.
+  suggestions.push(...checkDocsVsCodeDrift(input));
+
   return suggestions;
 }
 

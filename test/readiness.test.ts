@@ -185,6 +185,181 @@ describe("lintReadiness", () => {
     );
     expect(suggestions).toHaveLength(0);
   });
+
+  // -----------------------------------------------------------------------
+  // docs-vs-code-drift
+  // -----------------------------------------------------------------------
+  describe("readiness/docs-vs-code-drift", () => {
+    it("flags ${env:VAR} in docs when impl uses plain ${VAR}", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["docs/config.md"],
+          diffText: [
+            "+++ b/docs/config.md",
+            "+Use `${env:DATABASE_URL}` to inject secrets.",
+          ].join("\n"),
+          fileContents: {
+            "src/config.ts": 'const dbUrl = process.env.DATABASE_URL || "${DATABASE_URL}";',
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/docs-vs-code-drift"
+      );
+      expect(rule).toBeDefined();
+      expect(rule!.message).toContain("${env:VAR}");
+      expect(rule!.severity).toBe("suggestion");
+    });
+
+    it("does not flag ${env:VAR} when impl actually supports it", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["docs/config.md"],
+          diffText: [
+            "+++ b/docs/config.md",
+            "+Use `${env:DATABASE_URL}` to inject secrets.",
+          ].join("\n"),
+          fileContents: {
+            "src/config.ts": 'function parseEnvSubstitution(val) { /* handles ${env:...} */ }',
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/docs-vs-code-drift"
+      );
+      expect(rule).toBeUndefined();
+    });
+
+    it("flags op:// in docs when no resolver exists", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["README.md"],
+          diffText: [
+            "+++ b/README.md",
+            "+Secrets can be loaded from `op://vault/item/field`.",
+          ].join("\n"),
+          fileContents: {
+            "src/secrets.ts": "export function resolveSecrets() { return {}; }",
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) =>
+          s.rule === "readiness/docs-vs-code-drift" &&
+          s.message.includes("op://")
+      );
+      expect(rule).toBeDefined();
+    });
+
+    it("does not flag op:// when resolver exists in impl", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["README.md"],
+          diffText: [
+            "+++ b/README.md",
+            "+Secrets can be loaded from `op://vault/item/field`.",
+          ].join("\n"),
+          fileContents: {
+            "src/secrets.ts": "export class OnePasswordProvider { resolve() {} }",
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) =>
+          s.rule === "readiness/docs-vs-code-drift" &&
+          s.message.includes("op://")
+      );
+      expect(rule).toBeUndefined();
+    });
+
+    it("flags ${keyring:...} in docs when no keyring impl exists", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["docs/secrets.md"],
+          diffText: [
+            "+++ b/docs/secrets.md",
+            "+Use `${keyring:my-service/password}` for OS keychain.",
+          ].join("\n"),
+          fileContents: {
+            "src/config.ts": "const config = loadYaml();",
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) =>
+          s.rule === "readiness/docs-vs-code-drift" &&
+          s.message.includes("keyring")
+      );
+      expect(rule).toBeDefined();
+    });
+
+    it("does not flag when no docs files are changed", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["src/index.ts"],
+          diffText: "+Use `${env:FOO}` in config.",
+          fileContents: {},
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/docs-vs-code-drift"
+      );
+      expect(rule).toBeUndefined();
+    });
+
+    it("does not flag when docs change has no drift patterns", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["docs/guide.md"],
+          diffText: [
+            "+++ b/docs/guide.md",
+            "+This is a normal docs update with no special syntax.",
+          ].join("\n"),
+          fileContents: {},
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/docs-vs-code-drift"
+      );
+      expect(rule).toBeUndefined();
+    });
+
+    it("skips flagging when impl files are changed but no fileContents provided (conservative)", () => {
+      // When we can't verify implementation, and impl files are changed,
+      // we stay silent to avoid false positives.
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["docs/config.md", "src/config.ts"],
+          diffText: [
+            "+++ b/docs/config.md",
+            "+Use `${env:FOO}` for env vars.",
+            "+++ b/src/config.ts",
+            "+const x = 1;",
+          ].join("\n"),
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/docs-vs-code-drift"
+      );
+      expect(rule).toBeUndefined();
+    });
+
+    it("flags docs-only PR with drift patterns even without fileContents", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["docs/config.md"],
+          diffText: [
+            "+++ b/docs/config.md",
+            "+Use `${env:FOO}` for env vars.",
+          ].join("\n"),
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/docs-vs-code-drift"
+      );
+      expect(rule).toBeDefined();
+    });
+  });
 });
 
 describe("formatReadinessSuggestions", () => {
