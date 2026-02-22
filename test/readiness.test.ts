@@ -662,3 +662,37 @@ describe("formatReadinessSuggestions", () => {
     expect(result).toContain("non-blocking");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fixture-backed example-pack tests
+// ---------------------------------------------------------------------------
+import { readFileSync, readdirSync } from "fs";
+import { join } from "path";
+
+interface FixtureCase {
+  description: string;
+  input: ReadinessInput;
+  expectedRule: string;
+  shouldFire: boolean;
+}
+
+describe("readiness fixture examples", () => {
+  const fixtureDir = join(__dirname, "fixtures", "readiness");
+  const files = readdirSync(fixtureDir).filter((f) => f.endsWith(".json"));
+
+  for (const file of files) {
+    const fixture: FixtureCase = JSON.parse(
+      readFileSync(join(fixtureDir, file), "utf-8")
+    );
+
+    it(`${file}: ${fixture.description}`, () => {
+      const suggestions = lintReadiness(fixture.input);
+      const matched = suggestions.filter((s) => s.rule === fixture.expectedRule);
+      if (fixture.shouldFire) {
+        expect(matched.length).toBeGreaterThan(0);
+      } else {
+        expect(matched.length).toBe(0);
+      }
+    });
+  }
+});

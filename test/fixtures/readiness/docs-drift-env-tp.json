@@ -1,0 +1,13 @@
+{
+  "description": "True positive: docs claim ${env:VAR} but impl only uses process.env",
+  "input": {
+    "changedFiles": ["docs/config.md"],
+    "repoRootFiles": ["README.md", "src/config.ts"],
+    "diffText": "--- a/docs/config.md\n+++ b/docs/config.md\n@@ -1,2 +1,5 @@\n ## Configuration\n+\n+Use `${env:DB_HOST}` and `${env:DB_PORT}` to inject environment variables\n+into your configuration file.\n",
+    "fileContents": {
+      "src/config.ts": "const host = process.env.DB_HOST ?? 'localhost';\nconst port = process.env.DB_PORT ?? '5432';\n"
+    }
+  },
+  "expectedRule": "readiness/docs-vs-code-drift",
+  "shouldFire": true
+}

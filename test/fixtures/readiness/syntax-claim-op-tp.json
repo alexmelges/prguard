@@ -1,0 +1,14 @@
+{
+  "description": "True positive: config uses op:// but no 1Password resolver exists",
+  "input": {
+    "changedFiles": ["config/defaults.yml"],
+    "repoRootFiles": ["README.md"],
+    "diffText": "",
+    "fileContents": {
+      "config/defaults.yml": "secrets:\n  api_key: op://Production/API/credential\n",
+      "src/config.ts": "export const config = { apiKey: process.env.API_KEY };\n"
+    }
+  },
+  "expectedRule": "readiness/unsupported-syntax-claim",
+  "shouldFire": true
+}

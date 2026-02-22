@@ -1,0 +1,14 @@
+{
+  "description": "False positive suppressed: keyring resolver exists in implementation",
+  "input": {
+    "changedFiles": ["docs/config.md"],
+    "repoRootFiles": ["README.md"],
+    "diffText": "",
+    "fileContents": {
+      "docs/config.md": "Use `${keyring:my-app/db-password}` for OS keychain integration.\n",
+      "src/keyring-provider.ts": "export class KeyringProvider {\n  async resolve(ref: string): Promise<string> { return ''; }\n}\n"
+    }
+  },
+  "expectedRule": "readiness/unsupported-syntax-claim",
+  "shouldFire": false
+}

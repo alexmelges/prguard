@@ -1,0 +1,11 @@
+{
+  "description": "False positive suppressed: ${keyring:...} inside code fence is ignored",
+  "input": {
+    "changedFiles": ["docs/syntax-reference.md"],
+    "repoRootFiles": ["README.md"],
+    "diffText": "--- a/docs/syntax-reference.md\n+++ b/docs/syntax-reference.md\n@@ -0,0 +1,7 @@\n+Here is the full syntax reference:\n+\n+```yaml\n+# Example — not currently supported\n+database:\n+  password: ${keyring:my-service/db-password}\n+```\n",
+    "fileContents": {}
+  },
+  "expectedRule": "readiness/docs-vs-code-drift",
+  "shouldFire": false
+}
