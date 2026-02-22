@@ -360,6 +360,155 @@ describe("lintReadiness", () => {
       expect(rule).toBeDefined();
     });
   });
+
+  // -----------------------------------------------------------------------
+  // unsupported-syntax-claim
+  // -----------------------------------------------------------------------
+  describe("readiness/unsupported-syntax-claim", () => {
+    it("flags ${env:VAR} in existing docs when no resolver in impl", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["src/index.ts"],
+          fileContents: {
+            "docs/config.md": "Set `${env:DATABASE_URL}` in your config file.",
+            "src/config.ts": "const db = process.env.DATABASE_URL;",
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/unsupported-syntax-claim" && s.message.includes("${env:")
+      );
+      expect(rule).toBeDefined();
+      expect(rule!.severity).toBe("suggestion");
+    });
+
+    it("does not flag ${env:VAR} when impl has resolver", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["src/index.ts"],
+          fileContents: {
+            "docs/config.md": "Set `${env:DATABASE_URL}` in your config file.",
+            "src/config.ts": "function parseEnvSubstitution(val) { /* ${env:...} */ }",
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/unsupported-syntax-claim" && s.message.includes("${env:")
+      );
+      expect(rule).toBeUndefined();
+    });
+
+    it("flags op:// in config YAML when no resolver exists", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["src/index.ts"],
+          fileContents: {
+            "config.yaml": "secret: op://vault/item/field",
+            "src/secrets.ts": "export function getSecret() { return ''; }",
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/unsupported-syntax-claim" && s.message.includes("op://")
+      );
+      expect(rule).toBeDefined();
+    });
+
+    it("does not flag op:// when 1password resolver exists", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["src/index.ts"],
+          fileContents: {
+            "config.yaml": "secret: op://vault/item/field",
+            "src/secrets.ts": "class OnePasswordProvider { resolve() {} }",
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/unsupported-syntax-claim" && s.message.includes("op://")
+      );
+      expect(rule).toBeUndefined();
+    });
+
+    it("flags ${keyring:...} in markdown when no keyring impl", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["src/index.ts"],
+          fileContents: {
+            "README.md": "Use `${keyring:my-service/password}` for OS keychain.",
+            "src/config.ts": "const config = {};",
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/unsupported-syntax-claim" && s.message.includes("keyring")
+      );
+      expect(rule).toBeDefined();
+    });
+
+    it("flags ${vault:...} when no vault resolver", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["src/index.ts"],
+          fileContents: {
+            "docs/secrets.md": "Use `${vault:secret/data/myapp#password}` for Vault.",
+            "src/secrets.ts": "export const getSecret = () => '';",
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/unsupported-syntax-claim" && s.message.includes("vault")
+      );
+      expect(rule).toBeDefined();
+    });
+
+    it("flags ${ssm:...} when no SSM resolver", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["src/index.ts"],
+          fileContents: {
+            "config.toml": 'api_key = "${ssm:/prod/api-key}"',
+            "src/config.ts": "export const load = () => ({});",
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/unsupported-syntax-claim" && s.message.includes("ssm")
+      );
+      expect(rule).toBeDefined();
+    });
+
+    it("returns nothing when no fileContents provided", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["docs/config.md"],
+          diffText: "+Use ${env:FOO}",
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/unsupported-syntax-claim"
+      );
+      expect(rule).toBeUndefined();
+    });
+
+    it("includes file path and example in evidence", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["src/index.ts"],
+          fileContents: {
+            "docs/config.md": "Use `${keyring:svc/pass}` for secrets.",
+            "src/app.ts": "console.log('hello');",
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/unsupported-syntax-claim" && s.message.includes("keyring")
+      );
+      expect(rule).toBeDefined();
+      expect(rule!.message).toContain("docs/config.md");
+      expect(rule!.message).toContain("${keyring:svc/pass}");
+    });
+  });
 });
 
 describe("formatReadinessSuggestions", () => {

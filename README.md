@@ -299,6 +299,26 @@ Probot handles signature verification internally — no additional configuration
 4. Set webhook URL to `https://your-domain.com/api/github/webhooks`
 5. Generate a private key and note the App ID
 
+## 🤖 Agent-Readiness Rules
+
+PRGuard includes **non-blocking suggestion rules** that help make repos more consumable by automated agents. These never block PRs — they surface as advisory notes in the triage comment.
+
+| Rule | Fires when… |
+|------|------------|
+| `readiness/machine-readable-policy` | PR touches API files but repo lacks `openapi.yaml`, `SECURITY.md`, etc. |
+| `readiness/deterministic-error-schema` | API handlers send error statuses without structured JSON error bodies. |
+| `readiness/replay-test-signal` | Automation code (webhooks, workflows) changes without test/fixture changes. |
+| `readiness/docs-vs-code-drift` | PR adds docs claiming syntax (e.g. `${env:...}`) not supported by implementation. |
+| `readiness/unsupported-syntax-claim` | Existing docs/config reference resolver syntax (`${env:...}`, `${keyring:...}`, `op://`, `${vault:...}`, `${ssm:...}`) with no matching implementation. |
+
+The `unsupported-syntax-claim` rule scans all provided file contents — not just the PR diff — to catch pre-existing unsupported references that a PR may unknowingly depend on. It covers:
+
+- **`${env:VAR}`** — namespaced env substitution (vs plain `process.env`)
+- **`${keyring:service/key}`** — OS keychain providers
+- **`op://vault/item/field`** — 1Password CLI references
+- **`${vault:path#key}`** — HashiCorp Vault lookups
+- **`${ssm:/path/key}`** — AWS SSM Parameter Store
+
 ## 🧪 Development
 
 ```bash

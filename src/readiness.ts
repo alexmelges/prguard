@@ -331,6 +331,170 @@ function extractAddedDocsLines(
 export { extractAddedDocsLines as _extractAddedDocsLines };
 
 // ---------------------------------------------------------------------------
+// Rule: unsupported syntax claim in existing docs/config
+// ---------------------------------------------------------------------------
+
+/**
+ * Patterns for syntax claims that require specific resolver implementations.
+ * Unlike docs-vs-code-drift (which checks diff-added lines), this rule scans
+ * ALL provided doc/config file contents for unsupported syntax references.
+ */
+interface SyntaxClaimPattern {
+  /** Human-readable name. */
+  name: string;
+  /** Regex matching the syntax claim in doc/config content. */
+  claimPattern: RegExp;
+  /** Global version for extracting all occurrences. */
+  claimPatternGlobal: RegExp;
+  /** Regex that should match in implementation files if the syntax is supported. */
+  implEvidence: RegExp;
+  /** File-path regex identifying doc/config files to scan for claims. */
+  docPathPattern: RegExp;
+  /** File-path regex identifying implementation files to scan for evidence. */
+  implPathPattern: RegExp;
+  /** Remediation hint. */
+  remediation: string;
+}
+
+const SYNTAX_CLAIM_PATTERNS: SyntaxClaimPattern[] = [
+  {
+    name: "${env:...} namespaced substitution",
+    claimPattern: /\$\{env:[^}]+\}/,
+    claimPatternGlobal: /\$\{env:[^}]+\}/g,
+    implEvidence: /\$\{env:[^}]*\}|parseEnvSubstitution|resolveEnvPrefix|envPrefix|env\s*:\s*prefix/i,
+    docPathPattern: /\.(md|mdx|rst|txt|ya?ml|json|toml|ini|cfg)$/i,
+    implPathPattern: /\.(ts|js|mjs|cjs|py|rb|go|rs|java|kt)$/i,
+    remediation:
+      "The `${env:...}` namespaced syntax requires a dedicated resolver. " +
+      "If only plain `process.env` / `${VAR}` is supported, update docs to match.",
+  },
+  {
+    name: "${keyring:...} provider",
+    claimPattern: /\$\{keyring:[^}]+\}/,
+    claimPatternGlobal: /\$\{keyring:[^}]+\}/g,
+    implEvidence: /keyring|KeyringProvider|resolveKeyring/i,
+    docPathPattern: /\.(md|mdx|rst|txt|ya?ml|json|toml|ini|cfg)$/i,
+    implPathPattern: /\.(ts|js|mjs|cjs|py|rb|go|rs|java|kt)$/i,
+    remediation:
+      "No `keyring` resolver was found in the implementation. " +
+      "Remove the docs/config reference or implement the provider.",
+  },
+  {
+    name: "op:// (1Password) reference",
+    claimPattern: /op:\/\/[^\s)}`'"]+/,
+    claimPatternGlobal: /op:\/\/[^\s)}`'"]+/g,
+    implEvidence: /op:\/\/|OnePasswordProvider|resolve1Password|opResolver|1password/i,
+    docPathPattern: /\.(md|mdx|rst|txt|ya?ml|json|toml|ini|cfg)$/i,
+    implPathPattern: /\.(ts|js|mjs|cjs|py|rb|go|rs|java|kt)$/i,
+    remediation:
+      "No 1Password (`op://`) resolver was found. " +
+      "Remove the reference or implement the provider.",
+  },
+  {
+    name: "${vault:...} (HashiCorp Vault) reference",
+    claimPattern: /\$\{vault:[^}]+\}/,
+    claimPatternGlobal: /\$\{vault:[^}]+\}/g,
+    implEvidence: /vault:|VaultProvider|resolveVault|hashicorp/i,
+    docPathPattern: /\.(md|mdx|rst|txt|ya?ml|json|toml|ini|cfg)$/i,
+    implPathPattern: /\.(ts|js|mjs|cjs|py|rb|go|rs|java|kt)$/i,
+    remediation:
+      "No Vault resolver was found in the implementation. " +
+      "Remove the reference or implement the provider.",
+  },
+  {
+    name: "${ssm:...} (AWS SSM Parameter Store) reference",
+    claimPattern: /\$\{ssm:[^}]+\}/,
+    claimPatternGlobal: /\$\{ssm:[^}]+\}/g,
+    implEvidence: /ssm:|SSMProvider|resolveSSM|ParameterStore/i,
+    docPathPattern: /\.(md|mdx|rst|txt|ya?ml|json|toml|ini|cfg)$/i,
+    implPathPattern: /\.(ts|js|mjs|cjs|py|rb|go|rs|java|kt)$/i,
+    remediation:
+      "No AWS SSM Parameter Store resolver was found. " +
+      "Remove the reference or implement the provider.",
+  },
+];
+
+/**
+ * Scans all provided file contents for syntax claims in docs/config files
+ * that lack corresponding resolver support in implementation files.
+ *
+ * Unlike `docs-vs-code-drift`, this checks the FULL content of existing
+ * files — not just diff-added lines — catching pre-existing unsupported
+ * claims that a PR may unknowingly depend on.
+ */
+function checkUnsupportedSyntaxClaims(input: ReadinessInput): ReadinessSuggestion[] {
+  const results: ReadinessSuggestion[] = [];
+  if (!input.fileContents || Object.keys(input.fileContents).length === 0) {
+    return results;
+  }
+
+  // Separate doc/config files from implementation files.
+  const docEntries: [string, string][] = [];
+  const implParts: string[] = [];
+
+  for (const [path, content] of Object.entries(input.fileContents)) {
+    // A file can be both scanned for claims AND count as impl evidence
+    // (e.g. a .ts file that contains ${env:...} references AND a resolver).
+    let isImpl = false;
+    for (const pat of SYNTAX_CLAIM_PATTERNS) {
+      if (pat.implPathPattern.test(path)) {
+        isImpl = true;
+        break;
+      }
+    }
+    if (isImpl) implParts.push(content);
+
+    let isDoc = false;
+    for (const pat of SYNTAX_CLAIM_PATTERNS) {
+      if (pat.docPathPattern.test(path)) {
+        isDoc = true;
+        break;
+      }
+    }
+    if (isDoc) docEntries.push([path, content]);
+  }
+
+  const implText = implParts.join("\n");
+
+  for (const pattern of SYNTAX_CLAIM_PATTERNS) {
+    // Find claims across all doc/config files.
+    const claimFiles: string[] = [];
+    const examples: string[] = [];
+
+    for (const [path, content] of docEntries) {
+      if (!pattern.docPathPattern.test(path)) continue;
+      if (!pattern.claimPattern.test(content)) continue;
+
+      claimFiles.push(path);
+      // Extract first match as evidence.
+      const m = content.match(pattern.claimPatternGlobal);
+      if (m && examples.length < 2) {
+        examples.push(m[0].substring(0, 80));
+      }
+    }
+
+    if (claimFiles.length === 0) continue;
+
+    // Check implementation evidence.
+    if (implText && pattern.implEvidence.test(implText)) continue;
+
+    const fileList = claimFiles.slice(0, 3).map((f) => `\`${f}\``).join(", ");
+    const snippet = examples.length > 0 ? ` (e.g. \`${examples[0]}\`)` : "";
+
+    results.push({
+      rule: "readiness/unsupported-syntax-claim",
+      message:
+        `Found **${pattern.name}** references${snippet} in ${fileList} ` +
+        `but no corresponding resolver in the implementation. ` +
+        pattern.remediation,
+      severity: "suggestion",
+    });
+  }
+
+  return results;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -353,6 +517,7 @@ export function lintReadiness(input: ReadinessInput): ReadinessSuggestion[] {
 
   // Multi-result rules.
   suggestions.push(...checkDocsVsCodeDrift(input));
+  suggestions.push(...checkUnsupportedSyntaxClaims(input));
 
   return suggestions;
 }
