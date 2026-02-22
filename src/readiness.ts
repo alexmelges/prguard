@@ -223,7 +223,7 @@ function checkDocsVsCodeDrift(input: ReadinessInput): ReadinessSuggestion[] {
   const addedDocsLines = extractAddedDocsLines(input.diffText, docFiles);
   if (addedDocsLines.length === 0) return results;
 
-  const addedText = addedDocsLines.join("\n");
+  const addedText = stripPlannedLines(stripCodeFences(addedDocsLines.join("\n")));
 
   // Aggregate all known implementation content for pattern scanning.
   const implText = input.fileContents
@@ -327,8 +327,49 @@ function extractAddedDocsLines(
   return added;
 }
 
+/**
+ * Strip fenced code blocks (``` ... ```) from text to avoid matching
+ * syntax patterns inside illustrative examples.
+ */
+function stripCodeFences(text: string): string {
+  return text.replace(/^```[\s\S]*?^```/gm, "");
+}
+
+/**
+ * Remove lines that are clearly about planned/future/roadmap features,
+ * not current functionality claims.
+ */
+function stripPlannedLines(text: string): string {
+  return text
+    .split("\n")
+    .filter(
+      (line) =>
+        !/\b(planned|coming soon|future|roadmap|todo|proposal|rfc|not yet|will support|wip)\b/i.test(
+          line
+        )
+    )
+    .join("\n");
+}
+
+/** File paths that are inherently aspirational / not implementation claims. */
+const ROADMAP_PATH_PATTERN =
+  /\b(roadmap|changelog|migration|proposal|rfc|adr|decision)\b/i;
+
+/**
+ * Returns true if a doc file path is aspirational (roadmap, proposal, etc.)
+ * and should be excluded from syntax-claim scanning.
+ */
+function isRoadmapPath(filePath: string): boolean {
+  return ROADMAP_PATH_PATTERN.test(filePath);
+}
+
 // Re-export for testing.
-export { extractAddedDocsLines as _extractAddedDocsLines };
+export {
+  extractAddedDocsLines as _extractAddedDocsLines,
+  stripCodeFences as _stripCodeFences,
+  stripPlannedLines as _stripPlannedLines,
+  isRoadmapPath as _isRoadmapPath,
+};
 
 // ---------------------------------------------------------------------------
 // Rule: unsupported syntax claim in existing docs/config
@@ -463,11 +504,13 @@ function checkUnsupportedSyntaxClaims(input: ReadinessInput): ReadinessSuggestio
 
     for (const [path, content] of docEntries) {
       if (!pattern.docPathPattern.test(path)) continue;
-      if (!pattern.claimPattern.test(content)) continue;
+      if (isRoadmapPath(path)) continue;
+      const scannableContent = stripPlannedLines(stripCodeFences(content));
+      if (!pattern.claimPattern.test(scannableContent)) continue;
 
       claimFiles.push(path);
       // Extract first match as evidence.
-      const m = content.match(pattern.claimPatternGlobal);
+      const m = scannableContent.match(pattern.claimPatternGlobal);
       if (m && examples.length < 2) {
         examples.push(m[0].substring(0, 80));
       }

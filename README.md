@@ -319,6 +319,22 @@ The `unsupported-syntax-claim` rule scans all provided file contents — not jus
 - **`${vault:path#key}`** — HashiCorp Vault lookups
 - **`${ssm:/path/key}`** — AWS SSM Parameter Store
 
+### Suppressing False Positives
+
+The `docs-vs-code-drift` and `unsupported-syntax-claim` rules include built-in false-positive controls:
+
+| Technique | What it does |
+|-----------|-------------|
+| **Code fences** | Syntax inside markdown fenced code blocks (`` ``` ``) is ignored — examples and illustrative snippets won't trigger alerts. |
+| **Planned/future markers** | Lines containing keywords like *planned*, *coming soon*, *future*, *roadmap*, *TODO*, *proposal*, *RFC*, or *WIP* are excluded from scanning. |
+| **Roadmap file paths** | Files whose path contains `roadmap`, `changelog`, `migration`, `proposal`, `rfc`, `adr`, or `decision` are skipped entirely by the syntax-claim scanner. |
+
+If a rule still fires incorrectly, you can:
+
+1. **Wrap examples in code fences** — the simplest way to mark illustrative syntax.
+2. **Add "planned" or "future"** to the line — signals aspirational intent.
+3. **Move aspirational content** to a `roadmap.md` or `docs/proposals/` directory.
+
 ## 🧪 Development
 
 ```bash

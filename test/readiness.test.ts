@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { lintReadiness, formatReadinessSuggestions } from "../src/readiness.js";
+import {
+  lintReadiness,
+  formatReadinessSuggestions,
+  _stripCodeFences,
+  _stripPlannedLines,
+  _isRoadmapPath,
+} from "../src/readiness.js";
 import type { ReadinessInput } from "../src/readiness.js";
 
 function makeInput(overrides: Partial<ReadinessInput> = {}): ReadinessInput {
@@ -507,6 +513,133 @@ describe("lintReadiness", () => {
       expect(rule).toBeDefined();
       expect(rule!.message).toContain("docs/config.md");
       expect(rule!.message).toContain("${keyring:svc/pass}");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// False-positive controls
+// ---------------------------------------------------------------------------
+describe("false-positive controls", () => {
+  describe("code fences", () => {
+    it("strips code fences from text", () => {
+      const text = "before\n```yaml\nkey: ${env:SECRET}\n```\nafter";
+      expect(_stripCodeFences(text)).not.toContain("${env:SECRET}");
+    });
+
+    it("does not flag syntax inside code fences in docs diff", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["docs/examples.md"],
+          diffText: [
+            "+++ b/docs/examples.md",
+            "+Here is an example:",
+            "+```yaml",
+            "+secret: ${env:MY_SECRET}",
+            "+```",
+          ].join("\n"),
+          fileContents: {
+            "src/config.ts": "const x = process.env.FOO;",
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/docs-vs-code-drift"
+      );
+      expect(rule).toBeUndefined();
+    });
+
+    it("does not flag syntax inside code fences in existing docs (unsupported-syntax-claim)", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["src/index.ts"],
+          fileContents: {
+            "docs/examples.md":
+              "Example:\n```yaml\ndb: ${env:DATABASE_URL}\n```\nEnd.",
+            "src/config.ts": "const db = process.env.DATABASE_URL;",
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) =>
+          s.rule === "readiness/unsupported-syntax-claim" &&
+          s.message.includes("${env:")
+      );
+      expect(rule).toBeUndefined();
+    });
+  });
+
+  describe("planned/future markers", () => {
+    it("strips lines with planned/future keywords", () => {
+      const text = "Supported: ${env:A}\nPlanned: ${env:B} (coming soon)";
+      const stripped = _stripPlannedLines(text);
+      expect(stripped).toContain("${env:A}");
+      expect(stripped).not.toContain("${env:B}");
+    });
+
+    it("does not flag syntax on lines marked as planned in docs diff", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["docs/config.md"],
+          diffText: [
+            "+++ b/docs/config.md",
+            "+**Planned**: Support for `${env:VAR}` substitution (coming soon).",
+          ].join("\n"),
+          fileContents: {
+            "src/config.ts": "const x = 1;",
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) => s.rule === "readiness/docs-vs-code-drift"
+      );
+      expect(rule).toBeUndefined();
+    });
+
+    it("does not flag syntax in existing doc lines marked as future", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["src/index.ts"],
+          fileContents: {
+            "docs/config.md":
+              "Current: plain env vars.\nFuture: will support `${env:VAR}` syntax.",
+            "src/config.ts": "export const x = 1;",
+          },
+        })
+      );
+      const rule = suggestions.find(
+        (s) =>
+          s.rule === "readiness/unsupported-syntax-claim" &&
+          s.message.includes("${env:")
+      );
+      expect(rule).toBeUndefined();
+    });
+  });
+
+  describe("roadmap file paths", () => {
+    it("identifies roadmap paths", () => {
+      expect(_isRoadmapPath("docs/roadmap.md")).toBe(true);
+      expect(_isRoadmapPath("ROADMAP.md")).toBe(true);
+      expect(_isRoadmapPath("docs/proposal-secrets.md")).toBe(true);
+      expect(_isRoadmapPath("adr/003-secret-providers.md")).toBe(true);
+      expect(_isRoadmapPath("docs/config.md")).toBe(false);
+    });
+
+    it("does not flag syntax claims in roadmap files", () => {
+      const suggestions = lintReadiness(
+        makeInput({
+          changedFiles: ["src/index.ts"],
+          fileContents: {
+            "docs/roadmap.md":
+              "## Upcoming\n- `${env:VAR}` syntax\n- `${keyring:svc/pass}`\n- `op://vault/item`",
+            "src/config.ts": "export const x = 1;",
+          },
+        })
+      );
+      const syntaxClaims = suggestions.filter(
+        (s) => s.rule === "readiness/unsupported-syntax-claim"
+      );
+      expect(syntaxClaims).toHaveLength(0);
     });
   });
 });
