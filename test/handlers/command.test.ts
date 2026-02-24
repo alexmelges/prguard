@@ -29,6 +29,10 @@ function createMockOctokit() {
       listComments: vi.fn().mockResolvedValue({ data: [] }),
       createComment: vi.fn().mockResolvedValue({}),
       updateComment: vi.fn().mockResolvedValue({}),
+      listForRepo: vi.fn().mockResolvedValue({ data: [] }),
+    },
+    pulls: {
+      list: vi.fn().mockResolvedValue({ data: [] }),
     },
   };
 }
