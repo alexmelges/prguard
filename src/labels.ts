@@ -1,5 +1,13 @@
 import type { LabelConfig } from "./types.js";
 
+function isNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  return (error as { status?: number }).status === 404;
+}
+
 export async function ensureLabels(params: {
   octokit: {
     issues: {
@@ -23,23 +31,27 @@ export async function ensureLabels(params: {
   repo: string;
   labels: LabelConfig;
 }): Promise<void> {
-  try {
-    const defaults: Record<keyof LabelConfig, { color: string; description: string }> = {
-      duplicate: { color: "b60205", description: "Potential duplicate submission" },
-      off_scope: { color: "d93f0b", description: "Likely outside project vision" },
-      on_track: { color: "0e8a16", description: "Aligned with project vision" },
-      needs_review: { color: "fbca04", description: "Maintainer review needed" },
-      recommended: { color: "1d76db", description: "Strongest implementation among duplicates" }
-    };
+  const defaults: Record<keyof LabelConfig, { color: string; description: string }> = {
+    duplicate: { color: "b60205", description: "Potential duplicate submission" },
+    off_scope: { color: "d93f0b", description: "Likely outside project vision" },
+    on_track: { color: "0e8a16", description: "Aligned with project vision" },
+    needs_review: { color: "fbca04", description: "Maintainer review needed" },
+    recommended: { color: "1d76db", description: "Strongest implementation among duplicates" }
+  };
 
-    for (const [key, name] of Object.entries(params.labels) as Array<[keyof LabelConfig, string]>) {
+  for (const [key, name] of Object.entries(params.labels) as Array<[keyof LabelConfig, string]>) {
+    try {
+      await params.octokit.issues.getLabel({
+        owner: params.owner,
+        repo: params.repo,
+        name
+      });
+    } catch (error) {
+      if (!isNotFoundError(error)) {
+        continue;
+      }
+
       try {
-        await params.octokit.issues.getLabel({
-          owner: params.owner,
-          repo: params.repo,
-          name
-        });
-      } catch {
         await params.octokit.issues.createLabel({
           owner: params.owner,
           repo: params.repo,
@@ -47,10 +59,10 @@ export async function ensureLabels(params: {
           color: defaults[key].color,
           description: defaults[key].description
         });
+      } catch {
+        // Label operations are non-critical — continue gracefully
       }
     }
-  } catch {
-    // Label operations are non-critical — continue gracefully
   }
 }
 
