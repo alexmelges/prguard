@@ -339,7 +339,7 @@ describe("handleCommand", () => {
     it("reports no stale items when repo is fresh", async () => {
       const app = createMockApp();
       const octokit = createMockOctokit();
-      octokit.issues.listForRepo = vi.fn().mockResolvedValue({
+      (octokit.issues as any).listForRepo = vi.fn().mockResolvedValue({
         data: [{
           number: 1,
           title: "Fresh issue",
@@ -347,7 +347,7 @@ describe("handleCommand", () => {
           html_url: "https://github.com/myorg/myrepo/issues/1",
         }],
       });
-      octokit.pulls = { list: vi.fn().mockResolvedValue({ data: [] }) };
+      (octokit as any).pulls = { list: vi.fn().mockResolvedValue({ data: [] }) };
       const payload = createCommentPayload("/prguard stale");
 
       await handleCommand(app, { octokit, payload });
@@ -360,7 +360,7 @@ describe("handleCommand", () => {
       const app = createMockApp();
       const octokit = createMockOctokit();
       const staleDate = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
-      octokit.issues.listForRepo = vi.fn().mockResolvedValue({
+      (octokit.issues as any).listForRepo = vi.fn().mockResolvedValue({
         data: [{
           number: 5,
           title: "Old bug",
@@ -368,7 +368,7 @@ describe("handleCommand", () => {
           html_url: "https://github.com/myorg/myrepo/issues/5",
         }],
       });
-      octokit.pulls = { list: vi.fn().mockResolvedValue({ data: [] }) };
+      (octokit as any).pulls = { list: vi.fn().mockResolvedValue({ data: [] }) };
       const payload = createCommentPayload("/prguard stale");
 
       await handleCommand(app, { octokit, payload });
@@ -382,7 +382,7 @@ describe("handleCommand", () => {
     it("handles API errors gracefully", async () => {
       const app = createMockApp();
       const octokit = createMockOctokit();
-      octokit.issues.listForRepo = vi.fn().mockRejectedValue(new Error("API error"));
+      (octokit.issues as any).listForRepo = vi.fn().mockRejectedValue(new Error("API error"));
       const payload = createCommentPayload("/prguard stale");
 
       await handleCommand(app, { octokit, payload });
